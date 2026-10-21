@@ -1,35 +1,92 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Replace these placeholders with your Supabase Project URL and anon/publishable key.
-// Never put your Supabase service_role key in a Flutter app.
 const supabaseUrl = 'https://djzxjupdpvxpuyfbdpuz.supabase.co';
-const supabaseAnonKey = 'sb_publishable_n4OxKgiO8xKcfS2gUXP61A_OJMyjzZG';
+const supabasePublishableKey = 'sb_publishable_n4OxKgiO8xKcfS2gUXP61A_OJMyjzZG';
+const receiptBucket = 'receipts';
+
+final supabase = Supabase.instance.client;
+
+String _itemNameFromRow(Map<String, dynamic> row, [String fallback = '']) =>
+    (row['product_name'] ??
+            row['name'] ??
+            row['item_name'] ??
+            row['product'] ??
+            fallback)
+        .toString();
+
+double _itemPriceFromRow(Map<String, dynamic> row, [double fallback = 0]) =>
+    _toDouble(row['unit_price'] ??
+        row['price'] ??
+        row['item_price'] ??
+        row['amount'] ??
+        fallback);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(
     url: supabaseUrl,
-    publishableKey: supabaseAnonKey,
+    publishableKey: supabasePublishableKey,
   );
-  runApp(const ReceiptTrackerApp());
+  runApp(const ReceiptlyApp());
 }
 
-const ink = Color(0xFF232020);
-const green = Color(0xFFFF7315);
-const canvas = Color(0xFFF4F4F4);
-const muted = Color(0xFF3A3535);
-final money =
-    NumberFormat.currency(locale: 'en_PH', symbol: '₱', decimalDigits: 2);
-final dateFormat = DateFormat('MMM d, yyyy');
+class AppColors {
+  static const orange = Color(0xFFE85014);
+  static const black = Color(0xFF000000);
+  static const white = Color(0xFFF9F9F9);
+  static const gray = Color(0xFF646464);
+  static const lightGray = Color(0xFFA7A7A7);
+  static const darkGray = Color(0xFF333333);
+  static const background = Color(0xFFF4F4F4);
+  static const border = Color(0xFFE8E8E8);
+  static const decrease = Color(0xFF21865B);
+}
 
-class ReceiptTrackerApp extends StatelessWidget {
-  const ReceiptTrackerApp({super.key});
+class ReceiptProduct {
+  ReceiptProduct({
+    required this.name,
+    required this.price,
+    this.id,
+  });
+
+  final String name;
+  final double price;
+  final dynamic id;
+}
+
+class ReceiptInvoice {
+  ReceiptInvoice({
+    required this.id,
+    required this.number,
+    required this.date,
+    required this.total,
+    this.imagePath,
+    this.imageUrl,
+  });
+
+  final dynamic id;
+  String number;
+  DateTime date;
+  double total;
+  String? imagePath;
+  String? imageUrl;
+  final List<ReceiptProduct> products = [];
+}
+
+class Supplier {
+  Supplier({required this.name, this.id});
+
+  final dynamic id;
+  String name;
+  final List<ReceiptInvoice> invoices = [];
+}
+
+class ReceiptlyApp extends StatelessWidget {
+  const ReceiptlyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -38,1596 +95,1674 @@ class ReceiptTrackerApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: canvas,
+        scaffoldBackgroundColor: AppColors.background,
         colorScheme: ColorScheme.fromSeed(
-                seedColor: green, brightness: Brightness.light)
-            .copyWith(primary: ink, secondary: green, surface: Colors.white),
-        fontFamily: 'Roboto',
+          seedColor: AppColors.orange,
+          primary: AppColors.orange,
+          surface: AppColors.white,
+        ),
         appBarTheme: const AppBarTheme(
-          backgroundColor: canvas,
-          foregroundColor: ink,
+          backgroundColor: AppColors.background,
+          foregroundColor: AppColors.black,
           elevation: 0,
           centerTitle: false,
-          surfaceTintColor: Colors.transparent,
-        ),
-        cardTheme: CardThemeData(
-          color: Colors.white,
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFFF4F5F1),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide.none),
+          fillColor: AppColors.white,
+          hintStyle: const TextStyle(color: AppColors.lightGray),
           contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.orange, width: 1.5),
+          ),
         ),
       ),
-      home: const MainShell(),
+      home: const ReceiptlyHome(),
     );
   }
 }
 
-class ReceiptStore {
-  ReceiptStore._();
-  static final instance = ReceiptStore._();
+class ReceiptlyHome extends StatefulWidget {
+  const ReceiptlyHome({super.key});
 
-  SupabaseClient get _client => Supabase.instance.client;
+  @override
+  State<ReceiptlyHome> createState() => _ReceiptlyHomeState();
+}
 
-  Future<List<Map<String, Object?>>> receipts() async {
-    final rows = await _client
-        .from('receipts')
-        .select()
-        .order('receipt_date', ascending: false)
-        .order('id', ascending: false);
-    return rows
-        .map<Map<String, Object?>>((row) => Map<String, Object?>.from(row))
-        .toList();
+class _ReceiptlyHomeState extends State<ReceiptlyHome> {
+  int _selectedTab = 0;
+  bool _loading = true;
+  final List<Supplier> _suppliers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
   }
 
-  Future<List<Map<String, Object?>>> itemsFor(int receiptId) async {
-    final rows = await _client
-        .from('receipt_items')
-        .select()
-        .eq('receipt_id', receiptId)
-        .order('name');
-    return rows
-        .map<Map<String, Object?>>((row) => Map<String, Object?>.from(row))
-        .toList();
-  }
+  Future<void> _loadData() async {
+    setState(() => _loading = true);
+    try {
+      // Expected columns:
+      // suppliers: id, name
+      // Actual schema: receipts(id, supplier, invoice_no, receipt_date, total, image_path, raw_text, created_at)
+      // receipt_items(id, receipt_id, code, name, unit, quantity, unit_price, created_at)
+      final supplierRows = await supabase.from('suppliers').select();
+      final receiptRows = await supabase.from('receipts').select();
+      final itemRows = await supabase.from('receipt_items').select();
 
-  Future<List<Map<String, Object?>>> allItems() async {
-    final rows = await _client
-        .from('price_comparison_items')
-        .select()
-        .order('receipt_date', ascending: false)
-        .order('id', ascending: false);
-    return rows
-        .map<Map<String, Object?>>((row) => Map<String, Object?>.from(row))
-        .toList();
-  }
-
-  Future<void> saveReceipt({
-    required String supplier,
-    required String invoice,
-    required DateTime date,
-    required double total,
-    required String rawText,
-    String? imagePath,
-    required List<ReceiptItemDraft> items,
-  }) async {
-    final inserted = await _client
-        .from('receipts')
-        .insert({
-          'supplier': supplier.trim(),
-          'invoice_no': invoice.trim().isEmpty ? null : invoice.trim(),
-          'receipt_date': DateFormat('yyyy-MM-dd').format(date),
-          'total': total,
-          // This is the local device path, not a cloud image URL. Cloud image storage can be added later.
-          'image_path': imagePath,
-          'raw_text': rawText,
-        })
-        .select('id')
-        .single();
-
-    final receiptId = inserted['id'] as int;
-    final rows = items
-        .where((item) => item.name.trim().isNotEmpty)
-        .map((item) => <String, Object?>{
-              'receipt_id': receiptId,
-              'code': item.code.trim().isEmpty ? null : item.code.trim(),
-              'name': item.name.trim(),
-              'unit': item.unit.trim().isEmpty ? 'unit' : item.unit.trim(),
-              'quantity': item.quantity,
-              'unit_price': item.unitPrice,
-            })
-        .toList();
-
-    if (rows.isNotEmpty) {
-      try {
-        await _client.from('receipt_items').insert(rows);
-      } catch (_) {
-        // Avoid leaving an orphan receipt if its item rows fail to save.
-        await _client.from('receipts').delete().eq('id', receiptId);
-        rethrow;
+      final byName = <String, Supplier>{};
+      for (final row in supplierRows) {
+        final name = (row['name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        byName[name.toLowerCase()] = Supplier(name: name, id: row['id']);
       }
+
+      for (final row in receiptRows) {
+        final name = (row['supplier'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        final supplier = byName.putIfAbsent(
+          name.toLowerCase(),
+          () => Supplier(name: name),
+        );
+        final imagePath = row['image_path']?.toString();
+        final invoice = ReceiptInvoice(
+          id: row['id'],
+          number: (row['invoice_no'] ?? '').toString(),
+          date: DateTime.tryParse(
+                (row['receipt_date'] ?? '').toString(),
+              ) ??
+              DateTime.now(),
+          total: _toDouble(row['total']),
+          imagePath: imagePath,
+          imageUrl: await _signedImageUrl(imagePath),
+        );
+        supplier.invoices.add(invoice);
+      }
+
+      final invoicesById = <String, ReceiptInvoice>{};
+      for (final supplier in byName.values) {
+        for (final invoice in supplier.invoices) {
+          invoicesById[invoice.id.toString()] = invoice;
+        }
+      }
+      for (final row in itemRows) {
+        final invoice = invoicesById[(row['receipt_id'] ?? '').toString()];
+        if (invoice == null) continue;
+        invoice.products.add(
+          ReceiptProduct(
+            id: row['id'],
+            name: _itemNameFromRow(row),
+            price: _itemPriceFromRow(row),
+          ),
+        );
+      }
+      for (final supplier in byName.values) {
+        supplier.invoices.sort((a, b) => b.date.compareTo(a.date));
+        for (final invoice in supplier.invoices) {
+          // Recalculate from saved items for display consistency.
+          if (invoice.products.isNotEmpty) {
+            invoice.total =
+                invoice.products.fold(0, (sum, item) => sum + item.price);
+          }
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _suppliers
+          ..clear()
+          ..addAll(byName.values.toList()
+            ..sort((a, b) =>
+                a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _showError(
+          'Could not load Receiptly data. Check your table columns and RLS policies.\n$error');
     }
   }
 
-  Future<void> deleteReceipt(int id) async {
-    await _client.from('receipts').delete().eq('id', id);
-    // receipt_items are removed by the database's ON DELETE CASCADE constraint.
+  Future<String?> _signedImageUrl(String? path) async {
+    if (path == null || path.isEmpty) return null;
+    try {
+      return await supabase.storage
+          .from(receiptBucket)
+          .createSignedUrl(path, 60 * 60);
+    } catch (_) {
+      return null;
+    }
   }
-}
 
-class ReceiptItemDraft {
-  ReceiptItemDraft(
-      {this.code = '',
-      required this.name,
-      this.unit = 'unit',
-      this.quantity = 1,
-      this.unitPrice = 0});
-  String code;
-  String name;
-  String unit;
-  double quantity;
-  double unitPrice;
-  double get lineTotal => quantity * unitPrice;
-}
+  Future<void> _createSupplier() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const CreateSupplierDialog(),
+    );
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    final trimmed = name.trim();
+    if (_suppliers.any((s) => s.name.toLowerCase() == trimmed.toLowerCase())) {
+      _showError('This supplier already exists.');
+      return;
+    }
+    try {
+      final row = await supabase
+          .from('suppliers')
+          .insert({'name': trimmed})
+          .select()
+          .single();
+      if (!mounted) return;
+      setState(() => _suppliers.add(Supplier(name: trimmed, id: row['id'])));
+    } catch (error) {
+      _showError(
+          'Could not create supplier. Check suppliers.name and RLS.\n$error');
+    }
+  }
 
-class MainShell extends StatefulWidget {
-  const MainShell({super.key});
-  @override
-  State<MainShell> createState() => _MainShellState();
-}
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
-class _MainShellState extends State<MainShell> {
-  int selected = 0;
-  int refresh = 0;
-
-  void reload() => setState(() => refresh++);
+  void _openSupplier(Supplier supplier) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SupplierDetailPage(
+          supplier: supplier,
+          onChanged: _loadData,
+        ),
+      ),
+    ).then((_) => _loadData());
+  }
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      DashboardPage(
-          key: ValueKey('home$refresh'), onScan: () => openScan(context)),
-      RecordsPage(
-          key: ValueKey('records$refresh'),
-          onChanged: reload,
-          onAddReceipt: (supplier) => openScan(context, supplier: supplier)),
-      PricesPage(key: ValueKey('prices$refresh')),
-    ];
     return Scaffold(
-      body: SafeArea(child: IndexedStack(index: selected, children: pages)),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              width: 35,
+              height: 35,
+              decoration: BoxDecoration(
+                color: AppColors.orange,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: const Icon(Icons.receipt_long_rounded,
+                  color: AppColors.white, size: 21),
+            ),
+            const SizedBox(width: 10),
+            const Text('receiptly',
+                style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 24,
+                    letterSpacing: -1)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loadData,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _selectedTab == 0
+                ? _buildSuppliersPage()
+                : _buildComparisonPage(),
+      ),
+      floatingActionButton: _selectedTab == 0
+          ? FloatingActionButton.extended(
+              onPressed: _createSupplier,
+              backgroundColor: AppColors.orange,
+              foregroundColor: AppColors.white,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('New supplier'),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: selected,
-        onDestinationSelected: (value) => setState(() => selected = value),
-        backgroundColor: Colors.white,
-        indicatorColor: green.withValues(alpha: .45),
+        selectedIndex: _selectedTab,
+        onDestinationSelected: (index) => setState(() => _selectedTab = index),
+        backgroundColor: AppColors.white,
+        indicatorColor: AppColors.orange.withValues(alpha: 0.12),
         destinations: const [
           NavigationDestination(
-              icon: Icon(Icons.grid_view_rounded), label: 'Overview'),
+            icon: Icon(Icons.folder_outlined),
+            selectedIcon: Icon(Icons.folder_rounded, color: AppColors.orange),
+            label: 'Suppliers',
+          ),
           NavigationDestination(
-              icon: Icon(Icons.receipt_long_rounded), label: 'Records'),
-          NavigationDestination(
-              icon: Icon(Icons.trending_up_rounded), label: 'Price watch'),
+            icon: Icon(Icons.compare_arrows_rounded),
+            selectedIcon:
+                Icon(Icons.compare_arrows_rounded, color: AppColors.orange),
+            label: 'Compare',
+          ),
         ],
       ),
     );
   }
 
-  Future<void> openScan(BuildContext context, {String? supplier}) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ScanReviewPage(supplierName: supplier)));
-    reload();
-  }
-}
-
-class DashboardPage extends StatelessWidget {
-  const DashboardPage({super.key, required this.onScan});
-  final VoidCallback onScan;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Map<String, Object?>>>(
-      future: ReceiptStore.instance.receipts(),
-      builder: (context, snapshot) {
-        final receipts = snapshot.data ?? [];
-        return RefreshIndicator(
-          onRefresh: () async => (context as Element).markNeedsBuild(),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(22, 18, 22, 26),
-            children: [
-              Row(children: [
-                Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                        color: green, borderRadius: BorderRadius.circular(14)),
-                    child: const Icon(Icons.receipt_long_rounded,
-                        color: ink, size: 24)),
-                const SizedBox(width: 12),
-                const Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Text('RECEIPTLY',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 2,
-                              color: muted)),
-                      SizedBox(height: 3),
-                      Text('Good morning.',
-                          style: TextStyle(
-                              fontSize: 23,
-                              fontWeight: FontWeight.w800,
-                              color: ink)),
-                    ])),
-                CircleAvatar(
-                    backgroundColor: Colors.white,
-                    child: Icon(Icons.person_outline_rounded, color: ink)),
-              ]),
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(22),
-                decoration: BoxDecoration(
-                    color: ink, borderRadius: BorderRadius.circular(26)),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('YOUR DELIVERY DESK',
-                          style: TextStyle(
-                              color: green,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.5)),
-                      const SizedBox(height: 12),
-                      const Text('Every receipt.\nEvery price change.',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 27,
-                              height: 1.15,
-                              fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 10),
-                      Text(
-                          'Keep supplier deliveries organized and catch changes before they get missed.',
-                          style: TextStyle(
-                              color: Colors.white.withValues(alpha: .7),
-                              height: 1.45)),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: onScan,
-                            icon: const Icon(Icons.document_scanner_outlined),
-                            label: const Text('Scan a receipt'),
-                            style: FilledButton.styleFrom(
-                                backgroundColor: green,
-                                foregroundColor: ink,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16)),
-                          )),
-                    ]),
+  Widget _buildSuppliersPage() {
+    final invoiceCount = _suppliers.fold<int>(
+        0, (sum, supplier) => sum + supplier.invoices.length);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
+      children: [
+        const Text('Your inventory,\nwithout the guesswork.',
+            style: TextStyle(
+                fontSize: 28,
+                height: 1.15,
+                letterSpacing: -0.8,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(height: 10),
+        const Text(
+          'Track supplier invoices and spot price changes over time.',
+          style: TextStyle(color: AppColors.gray, fontSize: 14, height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            Expanded(
+              child: SummaryCard(
+                label: 'SUPPLIERS',
+                value: '${_suppliers.length}',
+                icon: Icons.storefront_outlined,
               ),
-              const SizedBox(height: 20),
-              Row(children: [
-                Expanded(
-                    child: _MetricCard(
-                        label: 'Receipts saved',
-                        value: '${receipts.length}',
-                        icon: Icons.inventory_2_outlined)),
-              ]),
-              const SizedBox(height: 25),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('Recent deliveries',
-                    style: TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w800, color: ink)),
-                Text('${receipts.length} total',
-                    style: const TextStyle(color: muted, fontSize: 12)),
-              ]),
-              const SizedBox(height: 12),
-              if (receipts.isEmpty)
-                const EmptyState(
-                    icon: Icons.receipt_long_outlined,
-                    title: 'Your records start here',
-                    subtitle:
-                        'Scan your first supplier receipt to build a searchable delivery history.')
-              else
-                ...receipts.take(4).map((r) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: ReceiptTile(receipt: r),
-                    )),
-              const SizedBox(height: 10),
-              const Text('TIP',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.4,
-                      color: muted)),
-              const SizedBox(height: 6),
-              const Text(
-                  'For reliable price comparisons, check the product name, pack size and unit price before saving OCR results.',
-                  style: TextStyle(color: muted, height: 1.45)),
-            ],
-          ),
-        );
-      },
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: SummaryCard(
+                label: 'INVOICES',
+                value: '$invoiceCount',
+                icon: Icons.receipt_outlined,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 28),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Supplier folders',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            Text('${_suppliers.length} total',
+                style: const TextStyle(color: AppColors.gray, fontSize: 12)),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (_suppliers.isEmpty)
+          EmptyState(
+            icon: Icons.folder_open_rounded,
+            title: 'Nothing here yet',
+            message:
+                'Create a supplier folder to start organizing your invoices.',
+            buttonLabel: 'Create supplier',
+            onPressed: _createSupplier,
+          )
+        else
+          ..._suppliers.map((supplier) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SupplierCard(
+                  supplier: supplier,
+                  onTap: () => _openSupplier(supplier),
+                ),
+              )),
+      ],
+    );
+  }
+
+  Widget _buildComparisonPage() {
+    final available =
+        _suppliers.where((supplier) => supplier.invoices.isNotEmpty).toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      children: [
+        const Text('Price comparison',
+            style: TextStyle(
+                fontSize: 28,
+                letterSpacing: -0.8,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        const Text(
+          'See how product prices change between invoices from the same supplier.',
+          style: TextStyle(color: AppColors.gray, fontSize: 14, height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        if (available.isEmpty)
+          const EmptyState(
+            icon: Icons.compare_arrows_rounded,
+            title: 'Nothing to compare yet',
+            message:
+                'Add invoices to your supplier folders. Price changes will appear here.',
+          )
+        else
+          ...available.map((supplier) => Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: SupplierComparison(supplier: supplier),
+              )),
+      ],
     );
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard(
-      {required this.label, required this.value, required this.icon});
-  final String label, value;
-  final IconData icon;
+class CreateSupplierDialog extends StatefulWidget {
+  const CreateSupplierDialog({super.key});
+
   @override
-  Widget build(BuildContext context) => Card(
-          child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(icon, color: muted, size: 20),
-          const SizedBox(height: 16),
+  State<CreateSupplierDialog> createState() => _CreateSupplierDialogState();
+}
+
+class _CreateSupplierDialogState extends State<CreateSupplierDialog> {
+  final _controller = TextEditingController();
+
+  void _submit() {
+    final value = _controller.text.trim();
+    if (value.isNotEmpty) Navigator.of(context).pop(value);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.white,
+      surfaceTintColor: Colors.transparent,
+      elevation: 12,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      title: const Text('New supplier',
+          style: TextStyle(fontWeight: FontWeight.w800)),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(
+          labelText: 'Supplier name',
+          hintText: 'e.g. Suysing Company',
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel', style: TextStyle(color: AppColors.gray)),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Create folder')),
+      ],
+    );
+  }
+}
+
+class SummaryCard extends StatelessWidget {
+  const SummaryCard({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.orange, size: 22),
+          const SizedBox(height: 18),
           Text(value,
               style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w800, color: ink)),
+                  fontSize: 27,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.7)),
           const SizedBox(height: 4),
-          Text(label, style: const TextStyle(color: muted, fontSize: 12)),
-        ]),
-      ));
-}
-
-class ReceiptTile extends StatelessWidget {
-  const ReceiptTile({super.key, required this.receipt});
-  final Map<String, Object?> receipt;
-  @override
-  Widget build(BuildContext context) {
-    final date =
-        DateTime.tryParse('${receipt['receipt_date']}') ?? DateTime.now();
-    return Card(
-        child: ListTile(
-      onTap: () {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ReceiptDetailsPage(
-            receipt: receipt,
-            supplier: '${receipt['supplier']}'.trim().isEmpty
-                ? 'Unknown supplier'
-                : '${receipt['supplier']}'.trim(),
-          ),
-        ));
-      },
-      contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 7),
-      leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-              color: canvas, borderRadius: BorderRadius.circular(13)),
-          child: const Icon(Icons.receipt_outlined, color: ink)),
-      title: Text('${receipt['supplier']}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(
-              'Invoice: ${receipt['invoice_no']?.toString().trim().isNotEmpty == true ? receipt['invoice_no'] : 'No invoice number'}',
+          Text(label,
               style: const TextStyle(
-                  color: ink, fontSize: 12, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 3),
-          Text(dateFormat.format(date),
-              style: const TextStyle(color: muted, fontSize: 11)),
-        ]),
-      ),
-      trailing: const Icon(Icons.chevron_right_rounded, color: muted),
-    ));
-  }
-}
-
-class RecordsPage extends StatefulWidget {
-  const RecordsPage(
-      {super.key, required this.onChanged, required this.onAddReceipt});
-  final VoidCallback onChanged;
-  final ValueChanged<String> onAddReceipt;
-  @override
-  State<RecordsPage> createState() => _RecordsPageState();
-}
-
-class _RecordsPageState extends State<RecordsPage> {
-  String query = '';
-
-  @override
-  Widget build(BuildContext context) =>
-      FutureBuilder<List<Map<String, Object?>>>(
-        future: ReceiptStore.instance.receipts(),
-        builder: (context, snapshot) {
-          final records = (snapshot.data ?? [])
-              .where((r) =>
-                  '${r['supplier']} ${r['invoice_no']} ${r['receipt_date']}'
-                      .toLowerCase()
-                      .contains(query.toLowerCase()))
-              .toList();
-          final folders = <String, List<Map<String, Object?>>>{};
-          for (final receipt in records) {
-            final supplier = '${receipt['supplier']}'.trim().isEmpty
-                ? 'Unknown supplier'
-                : '${receipt['supplier']}'.trim();
-            folders.putIfAbsent(supplier, () => []).add(receipt);
-          }
-          final folderNames = folders.keys.toList()
-            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-          return ListView(
-              padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
-              children: [
-                const Text('Suppliers',
-                    style: TextStyle(
-                        fontSize: 28, fontWeight: FontWeight.w800, color: ink)),
-                const SizedBox(height: 6),
-                const Text(
-                    'Each company has its own folder of delivery receipts.',
-                    style: TextStyle(color: muted)),
-                const SizedBox(height: 20),
-                TextField(
-                    onChanged: (v) => setState(() => query = v),
-                    decoration: const InputDecoration(
-                        hintText: 'Search companies, invoices or dates',
-                        prefixIcon: Icon(Icons.search_rounded))),
-                const SizedBox(height: 16),
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  const Center(
-                      child: Padding(
-                          padding: EdgeInsets.all(30),
-                          child: CircularProgressIndicator()))
-                else if (records.isEmpty)
-                  const EmptyState(
-                      icon: Icons.folder_open_rounded,
-                      title: 'No supplier folders yet',
-                      subtitle:
-                          'Scan your first delivery receipt. It will be filed under its supplier.')
-                else
-                  ...folderNames.map((supplier) {
-                    final folderReceipts = folders[supplier]!;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Card(
-                          child: Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          tilePadding: const EdgeInsets.symmetric(
-                              horizontal: 15, vertical: 5),
-                          childrenPadding:
-                              const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                          leading: Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                  color: green.withValues(alpha: .3),
-                                  borderRadius: BorderRadius.circular(13)),
-                              child:
-                                  const Icon(Icons.folder_rounded, color: ink)),
-                          title: Text(supplier,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w800, color: ink)),
-                          subtitle: Text(
-                              '${folderReceipts.length} receipt${folderReceipts.length == 1 ? '' : 's'}',
-                              style:
-                                  const TextStyle(color: muted, fontSize: 12)),
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.icon(
-                                  onPressed: () =>
-                                      widget.onAddReceipt(supplier),
-                                  icon: const Icon(Icons.add_rounded),
-                                  label:
-                                      const Text('Add receipt to this folder'),
-                                  style: FilledButton.styleFrom(
-                                      backgroundColor: green,
-                                      foregroundColor: ink),
-                                ),
-                              ),
-                            ),
-                            ...folderReceipts.map((receipt) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: Dismissible(
-                                    key: ValueKey(receipt['id']),
-                                    direction: DismissDirection.endToStart,
-                                    background: Container(
-                                        alignment: Alignment.centerRight,
-                                        padding:
-                                            const EdgeInsets.only(right: 18),
-                                        decoration: BoxDecoration(
-                                            color: Colors.red.shade50,
-                                            borderRadius:
-                                                BorderRadius.circular(14)),
-                                        child: const Icon(Icons.delete_outline,
-                                            color: Colors.red)),
-                                    confirmDismiss: (_) async {
-                                      final confirmed = await showDialog<bool>(
-                                          context: context,
-                                          builder: (ctx) => AlertDialog(
-                                                title: const Text(
-                                                    'Delete this receipt?'),
-                                                content: const Text(
-                                                    'This removes the receipt and its product rows from this device.'),
-                                                actions: [
-                                                  TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              ctx, false),
-                                                      child:
-                                                          const Text('Cancel')),
-                                                  FilledButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              ctx, true),
-                                                      child:
-                                                          const Text('Delete')),
-                                                ],
-                                              ));
-                                      return confirmed ?? false;
-                                    },
-                                    onDismissed: (_) async {
-                                      await ReceiptStore.instance
-                                          .deleteReceipt(receipt['id'] as int);
-                                      widget.onChanged();
-                                      if (mounted) setState(() {});
-                                    },
-                                    child: Material(
-                                      color: canvas,
-                                      borderRadius: BorderRadius.circular(14),
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(14),
-                                        onTap: () {
-                                          Navigator.of(context)
-                                              .push(MaterialPageRoute(
-                                            builder: (_) => ReceiptDetailsPage(
-                                              receipt: receipt,
-                                              supplier: supplier,
-                                            ),
-                                          ));
-                                        },
-                                        child: ListTile(
-                                          dense: true,
-                                          leading: const Icon(
-                                              Icons.receipt_long_outlined,
-                                              color: ink),
-                                          title: Text(
-                                              '${receipt['invoice_no'] ?? ''}'
-                                                      .trim()
-                                                      .isEmpty
-                                                  ? 'Delivery receipt'
-                                                  : 'Invoice ${receipt['invoice_no']}',
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.w700,
-                                                  color: ink)),
-                                          subtitle: Text(
-                                              '${receipt['receipt_date']} · Tap to view products',
-                                              style: const TextStyle(
-                                                  color: muted, fontSize: 12)),
-                                          trailing: const Icon(
-                                              Icons.chevron_right_rounded,
-                                              color: muted),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                )),
-                          ],
-                        ),
-                      )),
-                    );
-                  }),
-              ]);
-        },
-      );
-}
-
-class ReceiptDetailsPage extends StatelessWidget {
-  const ReceiptDetailsPage(
-      {super.key, required this.receipt, required this.supplier});
-
-  final Map<String, Object?> receipt;
-  final String supplier;
-
-  @override
-  Widget build(BuildContext context) {
-    final parsedDate = DateTime.tryParse('${receipt['receipt_date']}');
-    final dateText = parsedDate == null
-        ? '${receipt['receipt_date']}'
-        : dateFormat.format(parsedDate);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(supplier,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800)),
-      ),
-      body: FutureBuilder<List<Map<String, Object?>>>(
-        future: ReceiptStore.instance.itemsFor(receipt['id'] as int),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-                child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                  'Could not load products. Please check your Supabase receipt_items access policy.\n\n${snapshot.error}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: muted)),
-            ));
-          }
-          final items = snapshot.data ?? [];
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-            children: [
-              const Text('RECEIPT DETAILS',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.5,
-                      color: muted)),
-              const SizedBox(height: 5),
-              const Text('Products and prices',
-                  style: TextStyle(
-                      fontSize: 27, fontWeight: FontWeight.w900, color: ink)),
-              const SizedBox(height: 6),
-              Text('$supplier · $dateText',
-                  style: const TextStyle(color: muted)),
-              const SizedBox(height: 22),
-              if (items.isEmpty)
-                const EmptyState(
-                    icon: Icons.inventory_2_outlined,
-                    title: 'No products saved',
-                    subtitle:
-                        'This receipt has no product rows in Supabase. Scan and save it again to record the products.')
-              else ...[
-                Row(children: [
-                  const Expanded(
-                      child: Text('DETECTED PRODUCTS',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                              color: ink))),
-                  Text('${items.length} rows',
-                      style: const TextStyle(fontSize: 11, color: muted)),
-                ]),
-                const SizedBox(height: 10),
-                Card(
-                    child: Column(children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 14, 16, 12),
-                    child: Row(children: [
-                      Expanded(
-                          child: Text('PRODUCT',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1,
-                                  color: muted))),
-                      Text('UNIT PRICE',
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1,
-                              color: muted)),
-                    ]),
-                  ),
-                  const Divider(height: 1),
-                  ...items.map((item) => Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 15),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                  child: Text(
-                                      '${item['name'] ?? 'Unnamed product'}',
-                                      style: const TextStyle(
-                                          fontFamily: 'monospace',
-                                          fontSize: 12,
-                                          height: 1.45,
-                                          color: ink,
-                                          fontWeight: FontWeight.w500))),
-                              const SizedBox(width: 12),
-                              Text(
-                                  money.format((item['unit_price'] as num?)
-                                          ?.toDouble() ??
-                                      0),
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                      fontFamily: 'monospace',
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                      color: ink)),
-                            ]),
-                      )),
-                ])),
-              ],
-              const SizedBox(height: 18),
-              const Text('PRICE COMPARISON',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.1,
-                      color: muted)),
-              const SizedBox(height: 8),
-              FutureBuilder<List<Map<String, Object?>>>(
-                future: ReceiptStore.instance.allItems(),
-                builder: (context, comparisonSnapshot) {
-                  if (comparisonSnapshot.connectionState ==
-                      ConnectionState.waiting) {
-                    return const Padding(
-                        padding: EdgeInsets.all(18),
-                        child: Center(child: CircularProgressIndicator()));
-                  }
-                  if (comparisonSnapshot.hasError) {
-                    return const Text('Price comparison could not be loaded.',
-                        style: TextStyle(color: muted));
-                  }
-                  final all = (comparisonSnapshot.data ?? [])
-                      .where((row) =>
-                          '${row['supplier']}'.trim().toLowerCase() ==
-                          supplier.toLowerCase())
-                      .toList();
-                  final comparisons = <Map<String, Object?>>[];
-                  for (final item in items) {
-                    final name = '${item['name']}'.trim().toLowerCase();
-                    final matches = all
-                        .where((row) =>
-                            '${row['name']}'.trim().toLowerCase() == name)
-                        .toList()
-                      ..sort((a, b) => '${b['receipt_date']}'
-                          .compareTo('${a['receipt_date']}'));
-                    final currentId = receipt['id'];
-                    final previous = matches
-                        .where((row) => row['receipt_id'] != currentId)
-                        .toList();
-                    if (previous.isNotEmpty) {
-                      comparisons.add({
-                        'name': item['name'],
-                        'old': previous.first['unit_price'],
-                        'new': item['unit_price'],
-                        'date': previous.first['receipt_date']
-                      });
-                    }
-                  }
-                  if (comparisons.isEmpty) {
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16)),
-                      child: const Text(
-                          'No earlier matching product prices yet. Save another receipt from this supplier to compare prices.',
-                          style: TextStyle(color: muted, height: 1.4)),
-                    );
-                  }
-                  return Column(
-                      children: comparisons.map((comparison) {
-                    final oldPrice =
-                        (comparison['old'] as num?)?.toDouble() ?? 0;
-                    final newPrice =
-                        (comparison['new'] as num?)?.toDouble() ?? 0;
-                    final delta = newPrice - oldPrice;
-                    final percent =
-                        oldPrice == 0 ? 0.0 : delta / oldPrice * 100;
-                    final color = delta > 0
-                        ? Colors.red.shade700
-                        : delta < 0
-                            ? Colors.green.shade700
-                            : muted;
-                    return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Card(
-                            child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('${comparison['name']}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: ink)),
-                                const SizedBox(height: 8),
-                                Row(children: [
-                                  Expanded(
-                                      child: Text(
-                                          'Previous  ${money.format(oldPrice)}',
-                                          style: const TextStyle(
-                                              color: muted, fontSize: 12))),
-                                  Expanded(
-                                      child: Text(
-                                          'Latest  ${money.format(newPrice)}',
-                                          textAlign: TextAlign.right,
-                                          style: const TextStyle(
-                                              color: ink,
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 12))),
-                                ]),
-                                const SizedBox(height: 7),
-                                Text(
-                                    '${delta > 0 ? '+' : ''}${money.format(delta)} (${delta > 0 ? '+' : ''}${percent.toStringAsFixed(1)}%)',
-                                    style: TextStyle(
-                                        color: color,
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 12)),
-                              ]),
-                        )));
-                  }).toList());
-                },
-              ),
-            ],
-          );
-        },
+                  fontSize: 10,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.gray)),
+        ],
       ),
     );
   }
 }
 
-class PricesPage extends StatelessWidget {
-  const PricesPage({super.key});
+class SupplierCard extends StatelessWidget {
+  const SupplierCard({super.key, required this.supplier, required this.onTap});
+  final Supplier supplier;
+  final VoidCallback onTap;
+
   @override
-  Widget build(BuildContext context) =>
-      FutureBuilder<List<Map<String, Object?>>>(
-        future: ReceiptStore.instance.allItems(),
-        builder: (context, snapshot) {
-          final all = snapshot.data ?? [];
-          final groups = <String, List<Map<String, Object?>>>{};
-          for (final item in all) {
-            final key =
-                '${item['supplier']}|${(item['code'] ?? '').toString().trim().isNotEmpty ? item['code'] : item['name']}|${item['unit']}';
-            groups.putIfAbsent(key, () => []).add(item);
-          }
-          final changes = <({
-            Map<String, Object?> current,
-            Map<String, Object?> previous,
-            double delta
-          })>[];
-          for (final group in groups.values) {
-            if (group.length < 2) continue;
-            group.sort((a, b) =>
-                '${a['receipt_date']}'.compareTo('${b['receipt_date']}'));
-            final old =
-                (group[group.length - 2]['unit_price'] as num).toDouble();
-            final now = (group.last['unit_price'] as num).toDouble();
-            if ((now - old).abs() > 0.0001) {
-              changes.add((
-                current: group.last,
-                previous: group[group.length - 2],
-                delta: now - old
-              ));
-            }
-          }
-          changes.sort((a, b) => b.delta.abs().compareTo(a.delta.abs()));
-          return ListView(
-              padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                height: 49,
+                width: 49,
+                decoration: BoxDecoration(
+                  color: AppColors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(Icons.folder_rounded,
+                    color: AppColors.orange, size: 26),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(supplier.name,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${supplier.invoices.length} ${supplier.invoices.length == 1 ? 'invoice' : 'invoices'}',
+                      style:
+                          const TextStyle(color: AppColors.gray, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.lightGray, size: 25),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SupplierDetailPage extends StatefulWidget {
+  const SupplierDetailPage({
+    super.key,
+    required this.supplier,
+    required this.onChanged,
+  });
+  final Supplier supplier;
+  final VoidCallback onChanged;
+
+  @override
+  State<SupplierDetailPage> createState() => _SupplierDetailPageState();
+}
+
+class _SupplierDetailPageState extends State<SupplierDetailPage> {
+  final ImagePicker _picker = ImagePicker();
+  bool _busy = false;
+
+  Future<void> _addInvoice() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.white,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Add invoice',
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              const Text('Take a photo or choose an existing image.',
+                  style: TextStyle(color: AppColors.gray)),
+              const SizedBox(height: 18),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined,
+                    color: AppColors.orange),
+                title: const Text('Take a photo'),
+                onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined,
+                    color: AppColors.orange),
+                title: const Text('Choose from gallery'),
+                onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+
+    try {
+      final picked = await _picker.pickImage(source: source, imageQuality: 95);
+      if (picked == null || !mounted) return;
+      // Avoid launching the native cropper, which was disconnecting the Android
+      // process on this device. The selected original image is uploaded safely.
+      if (!mounted) return;
+      // Number invoices sequentially within this supplier folder. Dates are
+      // assigned automatically when the photo is selected.
+      final invoiceNumber = '#${_nextInvoiceNumber()}';
+      final invoiceDate = DateTime.now();
+
+      setState(() => _busy = true);
+      final file = File(picked.path);
+      final storagePath =
+          '${DateTime.now().millisecondsSinceEpoch}_${_safeFileName(invoiceNumber)}${_extensionFor(picked.path)}';
+      await supabase.storage.from(receiptBucket).upload(
+            storagePath,
+            file,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFor(picked.path),
+            ),
+          );
+
+      try {
+        final row = await supabase
+            .from('receipts')
+            .insert({
+              'supplier': widget.supplier.name,
+              'invoice_no': invoiceNumber,
+              'receipt_date': invoiceDate.toIso8601String().split('T').first,
+              'total': 0,
+              'image_path': storagePath,
+            })
+            .select()
+            .single();
+
+        final invoice = ReceiptInvoice(
+          id: row['id'],
+          number: (row['invoice_no'] ?? invoiceNumber).toString(),
+          date: DateTime.tryParse((row['receipt_date'] ?? '').toString()) ??
+              invoiceDate,
+          total: _toDouble(row['total']),
+          imagePath: storagePath,
+          imageUrl: await supabase.storage
+              .from(receiptBucket)
+              .createSignedUrl(storagePath, 3600),
+        );
+        if (!mounted) return;
+        setState(() {
+          widget.supplier.invoices.add(invoice);
+          widget.supplier.invoices.sort((a, b) => b.date.compareTo(a.date));
+        });
+        widget.onChanged();
+        _message('Invoice saved. Add its products next.');
+        _openInvoice(invoice);
+      } catch (_) {
+        // Avoid leaving an orphaned object if receipt insertion fails.
+        await supabase.storage.from(receiptBucket).remove([storagePath]);
+        rethrow;
+      }
+    } catch (error) {
+      _message(
+          'Could not add invoice. Check schema, bucket access, and RLS.\n$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  int _nextInvoiceNumber() {
+    var highest = 0;
+    for (final invoice in widget.supplier.invoices) {
+      final match = RegExp(r'^#?(\d+)$').firstMatch(invoice.number.trim());
+      final number = int.tryParse(match?.group(1) ?? '');
+      if (number != null && number > highest) highest = number;
+    }
+    return highest + 1;
+  }
+
+  String _safeFileName(String value) =>
+      value.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+
+  String _extensionFor(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return ['png', 'webp', 'heic', 'jpg', 'jpeg'].contains(ext)
+        ? '.$ext'
+        : '.jpg';
+  }
+
+  String _contentTypeFor(String path) {
+    switch (path.split('.').last.toLowerCase()) {
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'heic':
+        return 'image/heic';
+      default:
+        return 'image/jpeg';
+    }
+  }
+
+  void _message(String value) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value)));
+  }
+
+  void _openInvoice(ReceiptInvoice invoice) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InvoiceDetailPage(
+          supplier: widget.supplier,
+          invoice: invoice,
+          onChanged: widget.onChanged,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invoices = [...widget.supplier.invoices]
+      ..sort((a, b) => b.date.compareTo(a.date));
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.supplier.name,
+            style: const TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _busy ? null : _addInvoice,
+        backgroundColor: AppColors.orange,
+        foregroundColor: AppColors.white,
+        icon: _busy
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
+              )
+            : const Icon(Icons.document_scanner_outlined),
+        label: Text(_busy ? 'Saving...' : 'Scan invoice'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.black,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Row(
               children: [
-                const Text('Price watch',
-                    style: TextStyle(
-                        fontSize: 28, fontWeight: FontWeight.w800, color: ink)),
-                const SizedBox(height: 6),
-                const Text('Changes found across saved deliveries.',
-                    style: TextStyle(color: muted)),
-                const SizedBox(height: 20),
-                Container(
-                    padding: const EdgeInsets.all(17),
-                    decoration: BoxDecoration(
-                        color: green.withValues(alpha: .27),
-                        borderRadius: BorderRadius.circular(18)),
-                    child: Row(children: [
-                      const Icon(Icons.notifications_active_outlined,
-                          color: ink, size: 25),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Text(
-                              '${changes.length} price change${changes.length == 1 ? '' : 's'} detected in saved item history.',
-                              style: const TextStyle(
-                                  color: ink, fontWeight: FontWeight.w700))),
-                    ])),
-                const SizedBox(height: 16),
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  const Center(
-                      child: Padding(
-                          padding: EdgeInsets.all(30),
-                          child: CircularProgressIndicator()))
-                else if (changes.isEmpty)
-                  const EmptyState(
-                      icon: Icons.show_chart_rounded,
-                      title: 'No price changes yet',
-                      subtitle:
-                          'Save at least two deliveries containing the same supplier and product to compare prices.')
-                else
-                  ...changes.map((change) {
-                    final up = change.delta > 0;
-                    final old =
-                        (change.previous['unit_price'] as num).toDouble();
-                    final now =
-                        (change.current['unit_price'] as num).toDouble();
-                    final percent = old == 0 ? 0.0 : (change.delta / old) * 100;
-                    return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Card(
-                            child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  Expanded(
-                                      child: Text('${change.current['name']}',
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w800,
-                                              color: ink))),
-                                  Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 9, vertical: 6),
-                                      decoration: BoxDecoration(
-                                          color: up
-                                              ? const Color(0xFFFFE9E6)
-                                              : const Color(0xFFFFE9D9),
-                                          borderRadius:
-                                              BorderRadius.circular(10)),
-                                      child: Text(
-                                          '${up ? '+' : ''}${percent.toStringAsFixed(1)}%',
-                                          style: TextStyle(
-                                              color: up
-                                                  ? const Color(0xFFB23B2D)
-                                                  : const Color(0xFFB94C00),
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 12))),
-                                ]),
-                                const SizedBox(height: 7),
-                                Text(
-                                    '${change.current['supplier']} • ${change.current['unit']}',
-                                    style: const TextStyle(
-                                        color: muted, fontSize: 12)),
-                                const SizedBox(height: 12),
-                                Row(children: [
-                                  Text(money.format(old),
-                                      style: const TextStyle(
-                                          color: muted,
-                                          decoration:
-                                              TextDecoration.lineThrough)),
-                                  const Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(horizontal: 8),
-                                      child: Icon(Icons.arrow_forward_rounded,
-                                          size: 16, color: muted)),
-                                  Text(money.format(now),
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 17,
-                                          color: ink)),
-                                  const Spacer(),
-                                  Text(
-                                      '${up ? '+' : ''}${money.format(change.delta)}',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: up
-                                              ? const Color(0xFFB23B2D)
-                                              : const Color(0xFFB94C00))),
-                                ]),
-                                const SizedBox(height: 7),
-                                Text(
-                                    '${change.previous['receipt_date']} → ${change.current['receipt_date']}',
-                                    style: const TextStyle(
-                                        color: muted, fontSize: 11)),
-                              ]),
-                        )));
-                  }),
-                const SizedBox(height: 8),
-                const Text(
-                    'Matching uses supplier + product code (when available) + unit. Check descriptions and pack sizes to avoid false matches.',
-                    style: TextStyle(color: muted, fontSize: 12, height: 1.4)),
-              ]);
-        },
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('SUPPLIER FOLDER',
+                          style: TextStyle(
+                              color: AppColors.lightGray,
+                              fontSize: 10,
+                              letterSpacing: 1.4,
+                              fontWeight: FontWeight.w700)),
+                      SizedBox(height: 8),
+                      Text('Your invoice history.',
+                          style: TextStyle(
+                              color: AppColors.white,
+                              fontSize: 19,
+                              fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                ),
+                Icon(Icons.folder_special_outlined,
+                    size: 36, color: AppColors.orange),
+              ],
+            ),
+          ),
+          const SizedBox(height: 26),
+          Text('Invoices (${invoices.length})',
+              style:
+                  const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 14),
+          if (invoices.isEmpty)
+            const EmptyState(
+              icon: Icons.receipt_long_outlined,
+              title: 'No invoices yet',
+              message:
+                  'Scan a receipt or invoice to start tracking this supplier’s prices.',
+            )
+          else
+            ...invoices.map((invoice) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: InvoiceCard(
+                    invoice: invoice,
+                    onTap: () => _openInvoice(invoice),
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+}
+
+class InvoiceCard extends StatelessWidget {
+  const InvoiceCard({super.key, required this.invoice, required this.onTap});
+  final ReceiptInvoice invoice;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(17),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(17),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(17),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 45,
+                height: 49,
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.receipt_long_outlined,
+                    color: AppColors.darkGray),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Invoice ${invoice.number}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 14)),
+                    const SizedBox(height: 5),
+                    Text(formatDate(invoice.date),
+                        style: const TextStyle(
+                            color: AppColors.gray, fontSize: 12)),
+                    const SizedBox(height: 5),
+                    Text('${invoice.products.length} products',
+                        style: const TextStyle(
+                            color: AppColors.lightGray, fontSize: 11)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.lightGray),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class InvoiceDetailPage extends StatefulWidget {
+  const InvoiceDetailPage({
+    super.key,
+    required this.supplier,
+    required this.invoice,
+    required this.onChanged,
+  });
+  final Supplier supplier;
+  final ReceiptInvoice invoice;
+  final VoidCallback onChanged;
+
+  @override
+  State<InvoiceDetailPage> createState() => _InvoiceDetailPageState();
+}
+
+class _InvoiceDetailPageState extends State<InvoiceDetailPage> {
+  bool _saving = false;
+
+  Future<void> _addProduct() async {
+    final product = await showDialog<ReceiptProduct>(
+      context: context,
+      builder: (_) => const AddProductDialog(),
+    );
+    if (product == null || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      Map<String, dynamic>? row;
+      Object? lastInsertError;
+      // Existing projects use different naming conventions for these two fields.
+      // Try common variants; PostgREST rejects unknown columns without saving a row.
+      for (final nameColumn in [
+        'name',
+        'product_name',
+        'item_name',
+        'product'
+      ]) {
+        for (final priceColumn in [
+          'unit_price',
+          'price',
+          'item_price',
+          'amount'
+        ]) {
+          try {
+            row = await supabase
+                .from('receipt_items')
+                .insert({
+                  'receipt_id': widget.invoice.id,
+                  nameColumn: product.name,
+                  priceColumn: product.price,
+                  'unit': 'unit',
+                  'quantity': 1,
+                })
+                .select()
+                .single();
+            break;
+          } catch (error) {
+            lastInsertError = error;
+          }
+        }
+        if (row != null) break;
+      }
+      if (row == null) {
+        throw Exception(
+            'Could not insert receipt item. Verify receipt_items columns and RLS. $lastInsertError');
+      }
+      final saved = ReceiptProduct(
+        id: row['id'],
+        name: _itemNameFromRow(row, product.name),
+        price: _itemPriceFromRow(row, product.price),
       );
+      final updatedTotal = widget.invoice.products.fold<double>(
+            0,
+            (sum, item) => sum + item.price,
+          ) +
+          saved.price;
+      await supabase
+          .from('receipts')
+          .update({'total': updatedTotal}).eq('id', widget.invoice.id);
+      if (!mounted) return;
+      setState(() {
+        widget.invoice.products.add(saved);
+        widget.invoice.total = updatedTotal;
+      });
+      await _persistPriceComparisonItems();
+      widget.onChanged();
+    } catch (error) {
+      _message(
+          'Could not save product. Check receipt_items columns and RLS.\n$error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _removeProduct(ReceiptProduct product) async {
+    try {
+      if (product.id != null) {
+        await supabase.from('receipt_items').delete().eq('id', product.id);
+      }
+      final next = widget.invoice.products
+          .where((item) => item != product)
+          .fold<double>(0, (sum, item) => sum + item.price);
+      await supabase
+          .from('receipts')
+          .update({'total': next}).eq('id', widget.invoice.id);
+      if (!mounted) return;
+      setState(() {
+        widget.invoice.products.remove(product);
+        widget.invoice.total = next;
+      });
+      await _persistPriceComparisonItems();
+      widget.onChanged();
+    } catch (error) {
+      _message('Could not remove product.\n$error');
+    }
+  }
+
+  Future<void> _persistPriceComparisonItems() async {
+    try {
+      final receipts = await supabase
+          .from('receipts')
+          .select('id,supplier,receipt_date,invoice_no')
+          .eq('supplier', widget.supplier.name)
+          .order('receipt_date', ascending: false)
+          .limit(2);
+      if (receipts.isEmpty) return;
+      final ids = receipts.map((r) => r['id']).toList();
+      final itemRows = await supabase
+          .from('receipt_items')
+          .select('receipt_id,code,name,unit,quantity,unit_price')
+          .inFilter('receipt_id', ids);
+
+      // Keep the comparison table aligned with the latest two invoices.
+      await supabase
+          .from('price_comparison_items')
+          .delete()
+          .eq('supplier', widget.supplier.name);
+      final receiptById = <String, Map<String, dynamic>>{
+        for (final receipt in receipts) receipt['id'].toString(): receipt,
+      };
+      final rows = <Map<String, dynamic>>[];
+      for (final item in itemRows) {
+        final receipt = receiptById[(item['receipt_id'] ?? '').toString()];
+        if (receipt == null) continue;
+        rows.add({
+          'receipt_id': item['receipt_id'],
+          'code': item['code'],
+          'name': item['name'],
+          'unit': item['unit'] ?? 'unit',
+          'quantity': item['quantity'] ?? 1,
+          'unit_price': item['unit_price'],
+          'supplier': receipt['supplier'],
+          'receipt_date': receipt['receipt_date'],
+          'invoice_no': receipt['invoice_no'],
+        });
+      }
+      if (rows.isNotEmpty) {
+        await supabase.from('price_comparison_items').insert(rows);
+      }
+    } catch (error) {
+      // Product saving should remain successful even if comparison-table RLS
+      // has not been configured yet. Surface this only in debug logs.
+      debugPrint('Could not refresh price comparison items: $error');
+    }
+  }
+
+  void _message(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invoice = widget.invoice;
+    final imageProvider = invoice.imageUrl != null
+        ? NetworkImage(invoice.imageUrl!)
+        : invoice.imagePath != null && File(invoice.imagePath!).existsSync()
+            ? FileImage(File(invoice.imagePath!)) as ImageProvider
+            : null;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Invoice details',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        actions: [
+          IconButton(
+            tooltip: 'Add product',
+            onPressed: _saving ? null : _addProduct,
+            icon: const Icon(Icons.add_circle_outline_rounded),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _saving ? null : _addProduct,
+        backgroundColor: AppColors.orange,
+        foregroundColor: AppColors.white,
+        icon: _saving
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
+              )
+            : const Icon(Icons.add_rounded),
+        label: Text(_saving ? 'Saving...' : 'Add product'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+        children: [
+          if (imageProvider != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Material(
+                color: AppColors.white,
+                child: InkWell(
+                  onTap: () => _showFullImage(context, imageProvider),
+                  child: Stack(
+                    alignment: Alignment.bottomRight,
+                    children: [
+                      Image(
+                        image: imageProvider,
+                        height: 190,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _imageUnavailable(),
+                      ),
+                      Container(
+                        margin: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.zoom_out_map_rounded,
+                                size: 14, color: Colors.white),
+                            SizedBox(width: 5),
+                            Text('View image',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            _imageUnavailable(),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.storefront_outlined,
+                    size: 28, color: AppColors.orange),
+                const SizedBox(height: 10),
+                Text(widget.supplier.name.toUpperCase(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1)),
+                const SizedBox(height: 6),
+                const Text('INVOICE',
+                    style: TextStyle(
+                        color: AppColors.gray, letterSpacing: 2, fontSize: 11)),
+                const SizedBox(height: 20),
+                const Divider(),
+                const SizedBox(height: 12),
+                ReceiptInfoRow(label: 'Invoice', value: invoice.number),
+                const SizedBox(height: 10),
+                ReceiptInfoRow(
+                    label: 'Invoice date', value: formatDate(invoice.date)),
+                const SizedBox(height: 10),
+                ReceiptInfoRow(
+                    label: 'Total', value: formatPeso(invoice.total)),
+                const SizedBox(height: 18),
+                const Divider(),
+                const SizedBox(height: 15),
+                const Row(
+                  children: [
+                    Expanded(
+                      child: Text('PRODUCT',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: AppColors.gray,
+                              letterSpacing: 1,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                    Text('UNIT PRICE',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: AppColors.gray,
+                            letterSpacing: 1,
+                            fontWeight: FontWeight.w700)),
+                    SizedBox(width: 34),
+                  ],
+                ),
+                const SizedBox(height: 15),
+                if (invoice.products.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 22),
+                    child: Text(
+                      'No products added yet.\nAdd items from this invoice below.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.gray, height: 1.5),
+                    ),
+                  )
+                else
+                  ...invoice.products.map(
+                    (product) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(product.name,
+                                style: const TextStyle(fontSize: 13)),
+                          ),
+                          Text(formatPeso(product.price),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 13)),
+                          SizedBox(
+                            width: 34,
+                            child: IconButton(
+                              tooltip: 'Remove product',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: _saving
+                                  ? null
+                                  : () => _removeProduct(product),
+                              icon: const Icon(Icons.close_rounded,
+                                  size: 17, color: AppColors.lightGray),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                const Divider(),
+                const SizedBox(height: 14),
+                const Text('Thank you for your business.',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.lightGray,
+                        fontStyle: FontStyle.italic)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Product details are entered manually. Automatic receipt text extraction is not implemented yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.gray, fontSize: 11, height: 1.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFullImage(BuildContext context, ImageProvider imageProvider) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (dialogContext) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 5,
+                  child: Image(
+                    image: imageProvider,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Text(
+                      'Unable to load receipt image',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 18,
+              right: 16,
+              child: SafeArea(
+                child: IconButton.filledTonal(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white.withValues(alpha: 0.16),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Close image',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _imageUnavailable() => Container(
+        height: 120,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: const Text('Receipt image unavailable'),
+      );
+}
+
+class AddProductDialog extends StatefulWidget {
+  const AddProductDialog({super.key});
+
+  @override
+  State<AddProductDialog> createState() => _AddProductDialogState();
+}
+
+class _AddProductDialogState extends State<AddProductDialog> {
+  final _nameController = TextEditingController();
+  final _priceController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _priceController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameController.text.trim();
+    final price =
+        double.tryParse(_priceController.text.trim().replaceAll(',', ''));
+    if (name.isEmpty || price == null || price < 0) return;
+    Navigator.pop(context, ReceiptProduct(name: name, price: price));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.white,
+      surfaceTintColor: Colors.transparent,
+      elevation: 12,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+      contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      title: const Text('Add product',
+          style: TextStyle(
+              fontSize: 22, letterSpacing: -0.5, fontWeight: FontWeight.w700)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _nameController,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+                labelText: 'Product name', hintText: 'e.g. Nova'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _priceController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+                labelText: 'Unit price (₱)',
+                hintText: 'e.g. 8.00',
+                prefixText: '₱ '),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          style: TextButton.styleFrom(
+              foregroundColor: AppColors.gray,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 13)),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(
+              backgroundColor: AppColors.orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14))),
+          child: const Text('Add product'),
+        ),
+      ],
+    );
+  }
+}
+
+class ReceiptInfoRow extends StatelessWidget {
+  const ReceiptInfoRow({super.key, required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(label,
+              style: const TextStyle(color: AppColors.gray, fontSize: 12)),
+        ),
+        Text(value,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+      ],
+    );
+  }
+}
+
+class PriceChange {
+  const PriceChange({
+    required this.name,
+    required this.previous,
+    required this.current,
+  });
+  final String name;
+  final double previous;
+  final double current;
+  double get difference => current - previous;
+}
+
+class SupplierComparison extends StatelessWidget {
+  const SupplierComparison({super.key, required this.supplier});
+  final Supplier supplier;
+
+  @override
+  Widget build(BuildContext context) {
+    final invoices = [...supplier.invoices]
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final previous =
+        invoices.length >= 2 ? invoices[invoices.length - 2] : null;
+    final latest = invoices.isNotEmpty ? invoices.last : null;
+    final comparisons = <PriceChange>[];
+    if (previous != null && latest != null) {
+      for (final currentProduct in latest.products) {
+        ReceiptProduct? oldProduct;
+        for (final product in previous.products) {
+          if (product.name.trim().toLowerCase() ==
+              currentProduct.name.trim().toLowerCase()) {
+            oldProduct = product;
+            break;
+          }
+        }
+        if (oldProduct != null) {
+          comparisons.add(PriceChange(
+            name: currentProduct.name,
+            previous: oldProduct.price,
+            current: currentProduct.price,
+          ));
+        }
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(Icons.storefront_outlined,
+                    color: AppColors.orange),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(supplier.name,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 17),
+          if (previous == null || latest == null)
+            const Text('Add at least two invoices to compare prices.',
+                style: TextStyle(color: AppColors.gray, fontSize: 13))
+          else ...[
+            Row(
+              children: [
+                Expanded(
+                    child:
+                        InvoiceDateLabel(label: 'PREVIOUS', invoice: previous)),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: InvoiceDateLabel(label: 'LATEST', invoice: latest)),
+              ],
+            ),
+            const SizedBox(height: 17),
+            const Divider(),
+            const SizedBox(height: 8),
+            if (comparisons.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text('No matching products found in these two invoices.',
+                    style: TextStyle(color: AppColors.gray, fontSize: 12)),
+              )
+            else
+              ...comparisons.map((change) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Text(change.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 12)),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(formatPeso(change.previous),
+                              textAlign: TextAlign.end,
+                              style: const TextStyle(
+                                  color: AppColors.gray, fontSize: 11)),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(formatPeso(change.current),
+                              textAlign: TextAlign.end,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 11)),
+                        ),
+                        const SizedBox(width: 7),
+                        SizedBox(
+                            width: 75, child: ChangeIndicator(change: change)),
+                      ],
+                    ),
+                  )),
+            const SizedBox(height: 5),
+            const Text('Only products present in both invoices are compared.',
+                style: TextStyle(fontSize: 10, color: AppColors.lightGray)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class InvoiceDateLabel extends StatelessWidget {
+  const InvoiceDateLabel(
+      {super.key, required this.label, required this.invoice});
+  final String label;
+  final ReceiptInvoice invoice;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.gray,
+                  fontSize: 9,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 5),
+          Text(formatDate(invoice.date),
+              style:
+                  const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+          Text(invoice.number,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.gray, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+}
+
+class ChangeIndicator extends StatelessWidget {
+  const ChangeIndicator({super.key, required this.change});
+  final PriceChange change;
+
+  @override
+  Widget build(BuildContext context) {
+    final difference = change.difference;
+    final color = difference > 0
+        ? AppColors.orange
+        : difference < 0
+            ? AppColors.decrease
+            : AppColors.gray;
+    final icon = difference > 0
+        ? Icons.arrow_upward_rounded
+        : difference < 0
+            ? Icons.arrow_downward_rounded
+            : Icons.remove_rounded;
+    final label = difference == 0
+        ? '₱0.00'
+        : '${difference > 0 ? '+' : '-'}${formatPeso(difference.abs())}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 2),
+          Flexible(
+            child: Text(label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: color, fontSize: 9, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class EmptyState extends StatelessWidget {
-  const EmptyState(
-      {super.key,
-      required this.icon,
-      required this.title,
-      required this.subtitle});
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.buttonLabel,
+    this.onPressed,
+  });
   final IconData icon;
-  final String title, subtitle;
+  final String title;
+  final String message;
+  final String? buttonLabel;
+  final VoidCallback? onPressed;
+
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(20)),
-        child: Column(children: [
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
           Container(
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                  color: canvas, borderRadius: BorderRadius.circular(17)),
-              child: Icon(icon, color: ink, size: 26)),
-          const SizedBox(height: 13),
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: AppColors.orange.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(icon, color: AppColors.orange, size: 28),
+          ),
+          const SizedBox(height: 16),
           Text(title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w800, color: ink, fontSize: 16)),
-          const SizedBox(height: 7),
-          Text(subtitle,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: muted, height: 1.45, fontSize: 13)),
-        ]),
-      );
-}
-
-class ScanReviewPage extends StatefulWidget {
-  const ScanReviewPage({super.key, this.supplierName});
-  final String? supplierName;
-
-  @override
-  State<ScanReviewPage> createState() => _ScanReviewPageState();
-}
-
-class _ScanReviewPageState extends State<ScanReviewPage> {
-  final picker = ImagePicker();
-  String? supplierName;
-  String? imagePath;
-  String? statusMessage;
-  String? error;
-  bool scanning = false;
-  bool saved = false;
-  bool choosingImage = false;
-  List<ReceiptItemDraft> items = [];
-  DateTime receiptDate = DateTime.now();
-  String invoiceNumber = '';
-  String rawText = '';
-
-  @override
-  void initState() {
-    super.initState();
-    supplierName = widget.supplierName?.trim().isNotEmpty == true
-        ? widget.supplierName!.trim()
-        : null;
-  }
-
-  Future<String?> _askSupplierName() async {
-    final client = Supabase.instance.client;
-    List<String> existing = [];
-    try {
-      final rows = await client.from('suppliers').select('name').order('name');
-      existing = rows
-          .map<String>((r) => '${r['name']}'.trim())
-          .where((name) => name.isNotEmpty)
-          .toSet()
-          .toList();
-    } catch (_) {
-      // Older projects may only have supplier names saved on receipts.
-      try {
-        final rows =
-            await client.from('receipts').select('supplier').order('supplier');
-        existing = rows
-            .map<String>((r) => '${r['supplier']}'.trim())
-            .where((name) => name.isNotEmpty)
-            .toSet()
-            .toList();
-      } catch (_) {}
-    }
-    if (supplierName != null &&
-        supplierName!.trim().isNotEmpty &&
-        !existing.contains(supplierName!.trim())) {
-      existing.insert(0, supplierName!.trim());
-    }
-    final controller = TextEditingController();
-    String? dialogError;
-    bool creatingFolder = false;
-    String? selected = supplierName != null && existing.contains(supplierName)
-        ? supplierName
-        : (existing.isNotEmpty ? existing.first : null);
-    bool createNew = existing.isEmpty;
-    final value = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Choose company folder'),
-          content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (dialogError != null) ...[
-                  Text(dialogError!, style: const TextStyle(color: Colors.red)),
-                  const SizedBox(height: 8),
-                ],
-                if (!createNew && existing.isNotEmpty) ...[
-                  const Text('Select an existing company'),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: selected,
-                    isExpanded: true,
-                    items: existing
-                        .map((name) => DropdownMenuItem(
-                            value: name,
-                            child: Text(name, overflow: TextOverflow.ellipsis)))
-                        .toList(),
-                    onChanged: (name) => setDialogState(() => selected = name),
-                    decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.folder_outlined)),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton.icon(
-                    onPressed: () => setDialogState(() => createNew = true),
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                    label: const Text('Create another company folder'),
-                  ),
-                ],
-                if (createNew) ...[
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                        labelText: 'New company name',
-                        hintText: 'e.g. Buy Sing Commercial Corporation',
-                        prefixIcon: Icon(Icons.create_new_folder_outlined)),
-                  ),
-                  if (existing.isNotEmpty)
-                    TextButton(
-                        onPressed: () =>
-                            setDialogState(() => createNew = false),
-                        child: const Text('Select an existing folder')),
-                ],
-              ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel')),
-            FilledButton(
-              onPressed: creatingFolder
-                  ? null
-                  : () async {
-                      final name = createNew
-                          ? controller.text.trim()
-                          : (selected ?? '').trim();
-                      if (name.isEmpty) {
-                        setDialogState(() => dialogError =
-                            'Enter a company name or select a folder.');
-                        return;
-                      }
-                      if (createNew) {
-                        setDialogState(() {
-                          creatingFolder = true;
-                          dialogError = null;
-                        });
-                        try {
-                          await client
-                              .from('suppliers')
-                              .upsert({'name': name}, onConflict: 'name');
-                        } catch (e) {
-                          if (dialogContext.mounted) {
-                            setDialogState(() {
-                              creatingFolder = false;
-                              dialogError =
-                                  'Could not create company folder. Check Supabase permissions. $e';
-                            });
-                          }
-                          return;
-                        }
-                      }
-                      if (dialogContext.mounted)
-                        Navigator.of(dialogContext).pop(name);
-                    },
-              style: FilledButton.styleFrom(
-                  backgroundColor: green, foregroundColor: ink),
-              child: creatingFolder
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(createNew
-                      ? 'Create folder & continue'
-                      : 'Use this folder'),
-            ),
+              style: const TextStyle(
+                  color: AppColors.gray, height: 1.5, fontSize: 13)),
+          if (buttonLabel != null && onPressed != null) ...[
+            const SizedBox(height: 18),
+            FilledButton(onPressed: onPressed, child: Text(buttonLabel!)),
           ],
-        ),
+        ],
       ),
     );
-    // The dialog route has finished closing before its text controller is disposed.
-    controller.dispose();
-    return value?.trim().isNotEmpty == true ? value!.trim() : null;
   }
-
-  Future<void> scan(ImageSource source) async {
-    // Prevent overlapping picker launches, which can leave Android's activity
-    // and Flutter's widget tree in an inconsistent state.
-    if (choosingImage || scanning) return;
-    setState(() => choosingImage = true);
-    try {
-      if (supplierName == null || supplierName!.isEmpty) {
-        final chosen = await _askSupplierName();
-        if (!mounted || chosen == null) return;
-        setState(() => supplierName = chosen);
-      }
-
-      if (!mounted) return;
-      final image = await picker.pickImage(source: source, imageQuality: 100);
-      if (!mounted || image == null) return;
-      setState(() {
-        scanning = true;
-        saved = false;
-        error = null;
-        statusMessage = 'Reading the receipt and finding product prices…';
-        imagePath = image.path;
-        items = [];
-      });
-
-      final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-      List<ReceiptItemDraft> extracted;
-      try {
-        final result =
-            await recognizer.processImage(InputImage.fromFilePath(image.path));
-        rawText = result.text;
-        extracted = _parseProductRows(result);
-        final dateMatch = RegExp(
-          r'\b(\d{1,2}[/-]\d{1,2}[/-]\d{4})\b',
-        ).firstMatch(rawText);
-        if (dateMatch != null) {
-          receiptDate = _parseDate(dateMatch.group(1)!) ?? DateTime.now();
-        } else {
-          receiptDate = DateTime.now();
-        }
-        final invoiceMatch = RegExp(
-          r'(?:sales\s+invoice\s+no\.?|invoice\s*(?:no\.?|#)?|inv\.?\s*#?)\s*[:\-]?\s*([A-Z0-9-]{5,})',
-          caseSensitive: false,
-        ).firstMatch(rawText);
-        invoiceNumber = invoiceMatch?.group(1) ?? '';
-      } finally {
-        await recognizer.close();
-      }
-
-      if (!mounted) return;
-      if (extracted.isEmpty) {
-        setState(() {
-          scanning = false;
-          error =
-              'Receiptly could not confidently identify the product rows in this photo. Try a sharper photo taken straight above the receipt.';
-          statusMessage = null;
-        });
-        return;
-      }
-
-      setState(() {
-        items = extracted;
-        statusMessage =
-            'Detected ${items.length} product${items.length == 1 ? '' : 's'}. Saving to $supplierName…';
-      });
-
-      // Save automatically after OCR. No receipt-detail forms or manual product entry.
-      final receiptTotal =
-          items.fold<double>(0, (sum, item) => sum + item.lineTotal);
-      await ReceiptStore.instance.saveReceipt(
-        supplier: supplierName!,
-        invoice: invoiceNumber,
-        date: receiptDate,
-        total: receiptTotal,
-        rawText: rawText,
-        imagePath: image.path,
-        items: items,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        scanning = false;
-        saved = true;
-        statusMessage = 'Saved ${items.length} products to $supplierName.';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        scanning = false;
-        statusMessage = null;
-        error =
-            'Could not process or save this receipt. Check your connection and Supabase settings, then try again. Details: $e';
-      });
-    } finally {
-      if (mounted) setState(() => choosingImage = false);
-    }
-  }
-
-  DateTime? _parseDate(String value) {
-    for (final format in ['M/d/yyyy', 'd/M/yyyy', 'M-d-yyyy', 'd-M-yyyy']) {
-      try {
-        return DateFormat(format).parseStrict(value);
-      } catch (_) {}
-    }
-    return null;
-  }
-
-  double? _parseMoney(String value) =>
-      double.tryParse(value.replaceAll(',', '').replaceAll('₱', '').trim());
-
-  List<ReceiptItemDraft> _parseProductRows(RecognizedText result) {
-    final found = <ReceiptItemDraft>[];
-    final seen = <String>{};
-    final ignored = RegExp(
-      r'\b(qty|uom|description|invoice|gross amount|net amount|total sales|vat amount|vatable sales|customer|sold to|ship to|page|subtotal|discount|cash|change|balance|acknowledgment|reward points)\b',
-      caseSensitive: false,
-    );
-    final money = RegExp(r'^\d[\d,]*\.\d{2}$');
-    final units = RegExp(
-      r'^(CS|CASE|PC|PCS|BOX|BTL|PK|PACK|UNIT|KG|G|L|ML|BAG|CTN|DOZ)$',
-      caseSensitive: false,
-    );
-
-    // Use OCR line geometry to keep product descriptions and price columns aligned.
-    // This is more robust than assuming every receipt is returned as one plain-text line.
-    for (final block in result.blocks) {
-      for (final lineBlock in block.lines) {
-        final line = lineBlock.text.trim().replaceAll(RegExp(r'\s+'), ' ');
-        if (line.length < 8 || ignored.hasMatch(line)) continue;
-        final tokens = line.split(' ');
-        if (tokens.length < 8) continue;
-
-        // Buy Sing style: QTY UOM CODE DESCRIPTION BARCODE AREA U.PRICE PRICE AMOUNT.
-        final moneyIndexes = <int>[];
-        for (var i = 0; i < tokens.length; i++) {
-          if (money.hasMatch(tokens[i])) moneyIndexes.add(i);
-        }
-        if (moneyIndexes.length < 3) continue;
-        final lastThree = moneyIndexes.sublist(moneyIndexes.length - 3);
-        if (lastThree[1] != lastThree[0] + 1 ||
-            lastThree[2] != lastThree[1] + 1) {
-          // OCR sometimes inserts a space into columns; use the last three prices
-          // if the first price is still recognizable.
-          if (lastThree.length != 3) continue;
-        }
-
-        final qty = double.tryParse(tokens.first.replaceAll(',', ''));
-        final unit = tokens.length > 1 ? tokens[1] : '';
-        if (qty == null || qty <= 0 || !units.hasMatch(unit)) continue;
-
-        final code = tokens.length > 2 ? tokens[2] : '';
-        if (!RegExp(r'^[A-Za-z0-9-]{3,}$').hasMatch(code)) continue;
-
-        final unitPriceIndex = lastThree[0];
-        // Remove leading qty/unit/code and the trailing barcode/area/price columns.
-        final descriptionEnd = unitPriceIndex - 2;
-        if (descriptionEnd <= 3) continue;
-        final name = tokens.sublist(3, descriptionEnd).join(' ').trim();
-        final unitPrice = _parseMoney(tokens[unitPriceIndex]);
-        if (name.length < 3 ||
-            ignored.hasMatch(name) ||
-            unitPrice == null ||
-            unitPrice <= 0) {
-          continue;
-        }
-
-        final key =
-            '${code.toLowerCase()}|${name.toLowerCase()}|${unitPrice.toStringAsFixed(2)}';
-        if (!seen.add(key)) continue;
-        found.add(ReceiptItemDraft(
-          code: code,
-          name: name,
-          quantity: qty,
-          unit: unit,
-          unitPrice: unitPrice,
-        ));
-      }
-    }
-
-    // Fallback for OCR layouts where line blocks merge the columns.
-    if (found.isEmpty) {
-      final fallback = RegExp(
-        r'^(\d{1,4})\s+(CS|CASE|PC|PCS|BOX|BTL|PK|PACK|UNIT|KG|G|L|ML|BAG|CTN|DOZ)\s+([A-Z0-9-]{3,})\s+(.+?)\s+(\d[\d,]*\.\d{2})\s+(\d[\d,]*\.\d{2})\s+(\d[\d,]*\.\d{2})$',
-        caseSensitive: false,
-      );
-      for (final rawLine in result.text.split('\n')) {
-        final line = rawLine.trim().replaceAll(RegExp(r'\s+'), ' ');
-        final match = fallback.firstMatch(line);
-        if (match == null) continue;
-        final qty = double.tryParse(match.group(1)!) ?? 1;
-        final unit = match.group(2)!;
-        final code = match.group(3)!;
-        final name = match.group(4)!.trim();
-        final unitPrice = _parseMoney(match.group(5)!);
-        if (name.length < 3 ||
-            ignored.hasMatch(name) ||
-            unitPrice == null ||
-            unitPrice <= 0) {
-          continue;
-        }
-        final key =
-            '${code.toLowerCase()}|${name.toLowerCase()}|${unitPrice.toStringAsFixed(2)}';
-        if (seen.add(key)) {
-          found.add(ReceiptItemDraft(
-              code: code,
-              name: name,
-              quantity: qty,
-              unit: unit,
-              unitPrice: unitPrice));
-        }
-      }
-    }
-    return found;
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: const Text('Scan receipt',
-              style: TextStyle(fontWeight: FontWeight.w800)),
-          actions: [
-            if (saved)
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Done',
-                    style: TextStyle(color: ink, fontWeight: FontWeight.w800)),
-              ),
-          ],
-        ),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                  color: ink, borderRadius: BorderRadius.circular(22)),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('AUTOMATIC SCAN',
-                        style: TextStyle(
-                            color: green,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.4)),
-                    const SizedBox(height: 8),
-                    const Text(
-                        'Choose a receipt.\nWe’ll read the product prices.',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 21,
-                            fontWeight: FontWeight.w800,
-                            height: 1.2)),
-                    const SizedBox(height: 8),
-                    Text(
-                        'Supplier folder: ${supplierName ?? 'Choose a company when you scan'}',
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: .75),
-                            height: 1.4)),
-                    const SizedBox(height: 14),
-                    Row(children: [
-                      Expanded(
-                          child: OutlinedButton.icon(
-                        onPressed: (scanning || choosingImage)
-                            ? null
-                            : () => scan(ImageSource.camera),
-                        icon: const Icon(Icons.camera_alt_outlined),
-                        label: const Text('Take photo'),
-                        style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: BorderSide(
-                                color: Colors.white.withValues(alpha: .4))),
-                      )),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: FilledButton.icon(
-                        onPressed: (scanning || choosingImage)
-                            ? null
-                            : () => scan(ImageSource.gallery),
-                        icon: const Icon(Icons.photo_library_outlined),
-                        label: const Text('Choose image'),
-                        style: FilledButton.styleFrom(
-                            backgroundColor: green, foregroundColor: ink),
-                      )),
-                    ]),
-                    if (scanning)
-                      const Padding(
-                          padding: EdgeInsets.only(top: 14),
-                          child: LinearProgressIndicator()),
-                  ]),
-            ),
-            if (imagePath != null) ...[
-              const SizedBox(height: 12),
-              ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.file(File(imagePath!),
-                      height: 190,
-                      fit: BoxFit.contain,
-                      alignment: Alignment.center)),
-            ],
-            if (statusMessage != null) ...[
-              const SizedBox(height: 18),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                    color: saved ? const Color(0xFFFFE9D9) : Colors.white,
-                    borderRadius: BorderRadius.circular(16)),
-                child: Row(children: [
-                  Icon(
-                      saved
-                          ? Icons.check_circle_rounded
-                          : Icons.auto_awesome_rounded,
-                      color: ink),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: Text(statusMessage!,
-                          style: const TextStyle(
-                              color: ink, fontWeight: FontWeight.w700))),
-                ]),
-              ),
-            ],
-            if (items.isNotEmpty) ...[
-              const SizedBox(height: 22),
-              Row(children: [
-                const Expanded(
-                    child: Text('Detected products',
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: ink))),
-                Text('${items.length} found',
-                    style: const TextStyle(color: muted, fontSize: 12)),
-              ]),
-              const SizedBox(height: 8),
-              ...items.map((item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 7),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 13),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14)),
-                      child: Row(children: [
-                        Expanded(
-                            child: Text(item.name,
-                                style: const TextStyle(
-                                    color: ink, fontWeight: FontWeight.w600))),
-                        const SizedBox(width: 12),
-                        Text(money.format(item.unitPrice),
-                            style: const TextStyle(
-                                color: ink, fontWeight: FontWeight.w800)),
-                      ]),
-                    ),
-                  )),
-              const SizedBox(height: 6),
-              const Text(
-                  'These rows were extracted automatically. Please note that OCR can still misread small or blurry print.',
-                  style: TextStyle(color: muted, fontSize: 12, height: 1.4)),
-            ],
-            if (error != null) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFFFEFEC),
-                    borderRadius: BorderRadius.circular(14)),
-                child: Text(error!,
-                    style:
-                        const TextStyle(color: Color(0xFF9D2D21), height: 1.4)),
-              ),
-            ],
-            if (!scanning && !saved && imagePath == null) ...[
-              const SizedBox(height: 22),
-              const EmptyState(
-                  icon: Icons.document_scanner_outlined,
-                  title: 'Ready when you are',
-                  subtitle:
-                      'Choose a receipt image and Receiptly will extract product names and unit prices, then save them to the selected supplier folder.'),
-            ],
-          ],
-        ),
-      );
 }
+
+double _toDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+String formatDate(DateTime date) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
+  return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+String formatPeso(double value) => '₱${value.toStringAsFixed(2)}';
