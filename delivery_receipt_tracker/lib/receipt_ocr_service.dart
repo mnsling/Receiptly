@@ -106,10 +106,20 @@ class ReceiptOcrService {
       );
     }
 
+    // Read the DESCRIPTION column independently. Full-image OCR often joins
+    // DESCRIPTION, BCODE and AREA into one ML Kit line. A physical crop
+    // prevents adjacent-column characters from entering the description.
+    final descriptionLines = await _scanDescriptionColumn(imagePath, header);
+    final parsedLines = <_OcrLine>[
+      ...lines.where((l) => l.centerX < header.descriptionLeft ||
+          l.centerX >= header.descriptionRight),
+      ...descriptionLines,
+    ]..sort((a, b) => a.centerY.compareTo(b.centerY));
+
     // A printed item code is a much stronger row boundary than text height.
     // Prefer code-anchored extraction for delivery receipts with ITEM CODE.
     final secondPass = await _scanEnhancedPriceColumn(imagePath, header);
-    final anchored = _extractCodeAnchored(lines, header, secondPass);
+    final anchored = _extractCodeAnchored(parsedLines, header, secondPass);
     if (anchored != null) {
       return ReceiptOcrResult(
         products: anchored.products,
@@ -122,7 +132,7 @@ class ReceiptOcrService {
 
     // Receipts with short alphanumeric item codes (e.g. DEL105, CEN43)
     // are anchored by the UNIT PRICE column, not by 7-digit item codes.
-    final priceAnchored = _extractPriceAnchored(lines, header, secondPass);
+    final priceAnchored = _extractPriceAnchored(parsedLines, header, secondPass);
     if (priceAnchored != null) {
       return ReceiptOcrResult(
         products: priceAnchored.products,
@@ -134,7 +144,7 @@ class ReceiptOcrService {
     }
 
     // Non-item-code layouts retain the original fallback parser.
-    final tableRows = _groupIntoRows(lines.where((l) => l.centerY > header.bottom).toList());
+    final tableRows = _groupIntoRows(parsedLines.where((l) => l.centerY > header.bottom).toList());
     final products = <ReceiptOcrProduct>[];
     final warnings = <String>[];
 
@@ -144,7 +154,7 @@ class ReceiptOcrService {
       // Use the actual horizontal location of recognized text to determine
       // which column it belongs to. Do not choose the far-right amount column.
       final descriptionParts = row
-          .where((l) => _overlapsColumn(l, header.descriptionLeft, header.priceLeft))
+          .where((l) => _overlapsColumn(l, header.descriptionLeft, header.descriptionRight))
           .where((l) => !_looksLikeOnlyCodeOrQuantity(l.text))
           .map((l) => l.text.trim())
           .where((t) => t.isNotEmpty)
@@ -234,6 +244,47 @@ class ReceiptOcrService {
       if (temporary != null && await temporary.exists()) {
         await temporary.delete();
       }
+    }
+  }
+
+  // OCR on the physically cropped DESCRIPTION column. Unlike regex-based
+  // cleanup, this retains legitimate pack sizes (e.g. 50/155G, 10/5/155-P)
+  // while excluding neighboring BCODE and AREA text before recognition.
+  Future<List<_OcrLine>> _scanDescriptionColumn(
+      String path, _ReceiptHeader header) async {
+    File? temp;
+    try {
+      final source = img.decodeImage(await File(path).readAsBytes());
+      if (source == null) return [];
+      final left = header.descriptionLeft.floor().clamp(0, source.width - 2).toInt();
+      final right = header.descriptionRight.floor()
+          .clamp(left + 1, source.width).toInt();
+      final top = header.bottom.floor().clamp(0, source.height - 2).toInt();
+      if (right - left < 30) return [];
+      final crop = img.copyCrop(source, x: left, y: top,
+          width: right - left, height: source.height - top);
+      const scale = 2;
+      final enlarged = img.copyResize(crop, width: crop.width * scale,
+          height: crop.height * scale, interpolation: img.Interpolation.linear);
+      temp = File('${Directory.systemTemp.path}/receiptly_desc_${DateTime.now().microsecondsSinceEpoch}.png');
+      await temp.writeAsBytes(img.encodePng(enlarged));
+      final recognized = await _recognizer.processImage(InputImage.fromFilePath(temp.path));
+      final result = <_OcrLine>[];
+      for (final block in recognized.blocks) {
+        for (final line in block.lines) {
+          if (line.text.trim().isEmpty) continue;
+          final b = line.boundingBox;
+          result.add(_OcrLine(text: line.text.trim(),
+              left: left + b.left / scale, right: left + b.right / scale,
+              top: top + b.top / scale, bottom: top + b.bottom / scale));
+        }
+      }
+      return result;
+    } catch (_) {
+      // Do not silently fall back to contaminated full-image descriptions.
+      return [];
+    } finally {
+      if (temp != null && await temp.exists()) await temp.delete();
     }
   }
 
@@ -349,8 +400,8 @@ class ReceiptOcrService {
         ..sort((a, b) => a.left.compareTo(b.left));
       final parts = row.where((l) =>
           l.right > header.descriptionLeft &&
-          l.left < header.priceLeft &&
-          l.centerX < header.priceLeft &&
+          l.left < header.descriptionRight &&
+          l.centerX < header.descriptionRight &&
           !_isUnitPriceHeader(l.text) &&
           !_looksLikeSummary(l.text)).toList();
       var name = _cleanDescription(parts.map((l) => l.text).join(' '));
@@ -439,7 +490,7 @@ class ReceiptOcrService {
 
       final descriptions = row.where((l) =>
           l.centerX >= header.descriptionLeft &&
-          l.centerX < header.priceLeft &&
+          l.centerX < header.descriptionRight &&
           !_looksLikeOnlyCodeOrQuantity(l.text)).toList();
       final priceCells = row.where((l) =>
           l.centerX >= header.priceLeft &&
@@ -567,7 +618,26 @@ class ReceiptOcrService {
           ? pcsHeaders.last.right + 5
           : description.left - 8;
 
+      // BCODE is the first column after DESCRIPTION on the supplied receipt.
+      // AREA comes after BCODE. Never extend descriptions to U. PRICE.
+      var descriptionRight = price.left - 12.0;
+      for (final candidate in sameBand) {
+        final heading = _normal(candidate.text).replaceAll(' ', '');
+        if ((heading.startsWith('BCODE') || heading.startsWith('BARCODE') ||
+             heading.startsWith('AREA') || heading.startsWith('BC0DE')) &&
+            candidate.left > description.left &&
+            candidate.left < descriptionRight) {
+          descriptionRight = candidate.left - 5.0;
+        }
+      }
+      // If BCODE and DESCRIPTION are merged into one header line, the
+      // fallback remains the U. PRICE boundary, flagged for review.
+      if (descriptionRight <= descriptionStart + 20) {
+        descriptionRight = price.left - 12.0;
+      }
+
       return _ReceiptHeader(
+        descriptionRight: descriptionRight,
         bottom: [description.bottom, price.bottom].reduce((a, b) => a > b ? a : b),
         descriptionLeft: descriptionStart,
         priceLeft: price.left - 8,
@@ -733,12 +803,14 @@ class _ReceiptHeader {
   const _ReceiptHeader({
     required this.bottom,
     required this.descriptionLeft,
+    required this.descriptionRight,
     required this.priceLeft,
     required this.priceRight,
   });
 
   final double bottom;
   final double descriptionLeft;
+  final double descriptionRight;
   final double priceLeft;
   final double priceRight;
 }

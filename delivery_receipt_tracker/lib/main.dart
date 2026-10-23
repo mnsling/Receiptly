@@ -1,25 +1,18 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'receipt_ocr_service.dart';
 import 'receipt_crop_page.dart';
-
 const supabaseUrl = 'https://djzxjupdpvxpuyfbdpuz.supabase.co';
 const supabasePublishableKey =
     'sb_publishable_n4OxKgiO8xKcfS2gUXP61A_OJMyjzZG';
 const receiptBucket = 'receipts';
-
 final supabase = Supabase.instance.client;
-
 String _itemNameFromRow(Map<String, dynamic> row, [String fallback = '']) =>
     (row['product_name'] ?? row['name'] ?? row['item_name'] ?? row['product'] ?? fallback).toString();
-
 double _itemPriceFromRow(Map<String, dynamic> row, [double fallback = 0]) =>
     _toDouble(row['unit_price'] ?? row['price'] ?? row['item_price'] ?? row['amount'] ?? fallback);
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(
@@ -28,7 +21,6 @@ Future<void> main() async {
   );
   runApp(const ReceiptlyApp());
 }
-
 class AppColors {
   static const orange = Color(0xFFE85014);
   static const black = Color(0xFF000000);
@@ -40,19 +32,16 @@ class AppColors {
   static const border = Color(0xFFE8E8E8);
   static const decrease = Color(0xFF21865B);
 }
-
 class ReceiptProduct {
   ReceiptProduct({
     required this.name,
     required this.price,
     this.id,
   });
-
   final String name;
   final double price;
   final dynamic id;
 }
-
 class ReceiptInvoice {
   ReceiptInvoice({
     required this.id,
@@ -63,7 +52,6 @@ class ReceiptInvoice {
     this.imagePath,
     this.imageUrl,
   });
-
   final dynamic id;
   String number;
   DateTime date;
@@ -73,18 +61,14 @@ class ReceiptInvoice {
   String? imageUrl;
   final List<ReceiptProduct> products = [];
 }
-
 class Supplier {
   Supplier({required this.name, this.id});
-
   final dynamic id;
   String name;
   final List<ReceiptInvoice> invoices = [];
 }
-
 class ReceiptlyApp extends StatelessWidget {
   const ReceiptlyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -129,25 +113,34 @@ class ReceiptlyApp extends StatelessWidget {
     );
   }
 }
-
 class ReceiptlyHome extends StatefulWidget {
   const ReceiptlyHome({super.key});
-
   @override
   State<ReceiptlyHome> createState() => _ReceiptlyHomeState();
 }
-
 class _ReceiptlyHomeState extends State<ReceiptlyHome> {
   int _selectedTab = 0;
+  String _supplierSearch = '';
+  final TextEditingController _supplierSearchController = TextEditingController();
   bool _loading = true;
   final List<Supplier> _suppliers = [];
-
   @override
   void initState() {
     super.initState();
     _loadData();
   }
-
+  @override
+  void dispose() {
+    _supplierSearchController.dispose();
+    super.dispose();
+  }
+  Future<void> _manageAliases() async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _AliasManagerDialog(),
+    );
+    if (changed == true && mounted) await _loadData();
+  }
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
@@ -158,7 +151,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       final supplierRows = await supabase.from('suppliers').select();
       final receiptRows = await supabase.from('receipts').select();
       final itemRows = await supabase.from('receipt_items').select();
-
+      await _loadConfirmedAliases();
       final byName = <String, Supplier>{};
       for (final row in supplierRows) {
         final name = (row['name'] ?? '').toString().trim();
@@ -166,7 +159,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
         byName[name.toLowerCase()] =
             Supplier(name: name, id: row['id']);
       }
-
       for (final row in receiptRows) {
         final name = (row['supplier'] ?? '').toString().trim();
         if (name.isEmpty) continue;
@@ -189,7 +181,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
         );
         supplier.invoices.add(invoice);
       }
-
       final invoicesById = <String, ReceiptInvoice>{};
       for (final supplier in byName.values) {
         for (final invoice in supplier.invoices) {
@@ -210,7 +201,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       for (final supplier in byName.values) {
         supplier.invoices.sort((a, b) => b.date.compareTo(a.date));
       }
-
       if (!mounted) return;
       setState(() {
         _suppliers
@@ -225,7 +215,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       _showError('Could not load Receiptly data. Check your table columns and RLS policies.\n$error');
     }
   }
-
   Future<String?> _signedImageUrl(String? path) async {
     if (path == null || path.isEmpty) return null;
     try {
@@ -236,7 +225,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       return null;
     }
   }
-
   Future<void> _createSupplier() async {
     final name = await showDialog<String>(
       context: context,
@@ -260,14 +248,12 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       _showError('Could not create supplier. Check suppliers.name and RLS.\n$error');
     }
   }
-
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
-
   void _openSupplier(Supplier supplier) {
     Navigator.push(
       context,
@@ -279,7 +265,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       ),
     ).then((_) => _loadData());
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -305,6 +290,11 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Manage product aliases',
+            onPressed: _manageAliases,
+            icon: const Icon(Icons.merge_type_rounded),
+          ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loadData,
@@ -350,10 +340,15 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       ),
     );
   }
-
   Widget _buildSuppliersPage() {
-    final invoiceCount =
-        _suppliers.fold<int>(0, (sum, supplier) => sum + supplier.invoices.length);
+    final productCount = _suppliers.fold<int>(0,
+        (sum, supplier) => sum + _latestSupplierPrices(supplier).length);
+    final filteredSuppliers = _suppliers
+        .where((supplier) => supplier.name
+            .toLowerCase()
+            .contains(_supplierSearch.trim().toLowerCase()))
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       children: [
@@ -365,7 +360,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
                 fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
         const Text(
-          'Track supplier invoices and spot price changes over time.',
+          'Scan receipts to keep each supplier’s product prices up to date.',
           style: TextStyle(color: AppColors.gray, fontSize: 14, height: 1.5),
         ),
         const SizedBox(height: 24),
@@ -381,8 +376,8 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
             const SizedBox(width: 12),
             Expanded(
               child: SummaryCard(
-                label: 'INVOICES',
-                value: '$invoiceCount',
+                label: 'PRODUCTS',
+                value: '$productCount',
                 icon: Icons.receipt_outlined,
               ),
             ),
@@ -399,16 +394,58 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
           ],
         ),
         const SizedBox(height: 14),
+        TextField(
+          controller: _supplierSearchController,
+          onChanged: (value) => setState(() => _supplierSearch = value),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Search suppliers...',
+            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.gray),
+            suffixIcon: _supplierSearch.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    onPressed: () {
+                      _supplierSearchController.clear();
+                      setState(() => _supplierSearch = '');
+                    },
+                    icon: const Icon(Icons.close_rounded),
+                  )
+                : null,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('${filteredSuppliers.length} ${filteredSuppliers.length == 1 ? 'supplier' : 'suppliers'}',
+                style: const TextStyle(color: AppColors.gray, fontSize: 12)),
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.sort_by_alpha_rounded, size: 16, color: AppColors.gray),
+                SizedBox(width: 5),
+                Text('A–Z', style: TextStyle(color: AppColors.gray, fontSize: 12)),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         if (_suppliers.isEmpty)
           EmptyState(
             icon: Icons.folder_open_rounded,
             title: 'Nothing here yet',
-            message: 'Create a supplier folder to start organizing your invoices.',
+            message: 'Create a supplier to start tracking product prices.',
             buttonLabel: 'Create supplier',
             onPressed: _createSupplier,
           )
+        else if (filteredSuppliers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 30),
+            child: Center(child: Text('No matching suppliers found.',
+                style: TextStyle(color: AppColors.gray))),
+          )
         else
-          ..._suppliers.map((supplier) => Padding(
+          ...filteredSuppliers.map((supplier) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: SupplierCard(
                   supplier: supplier,
@@ -418,117 +455,116 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       ],
     );
   }
-
   Widget _buildComparisonPage() {
-    final history = <String, List<_CrossSupplierPrice>>{};
+    final grouped = <String, List<_SupplierLatestPrice>>{};
     for (final supplier in _suppliers) {
-      for (final invoice in supplier.invoices) {
-        for (final product in invoice.products) {
-          final key = _productComparisonKey(product.name);
-          if (key.isEmpty) continue;
-          history.putIfAbsent(key, () => []).add(
-            _CrossSupplierPrice(
-              name: product.name,
-              price: product.price,
-              supplier: supplier.name,
-              invoice: invoice,
-            ),
-          );
-        }
+      for (final item in _latestSupplierPrices(supplier)) {
+        grouped.putIfAbsent(item.key, () => []).add(
+          _SupplierLatestPrice(supplier.name, item.name, item.price,
+              item.previous != null && item.price > item.previous!
+                  ? item.price - item.previous! : 0));
       }
     }
-
-    final comparisons = <_CrossSupplierComparison>[];
-    for (final entries in history.values) {
-      entries.sort((a, b) {
-        // Compare when the invoices were SAVED, not invoice numbers:
-        // XYZ #1 can be newer than Suysing #2.
-        final aTime = a.invoice.createdAt ?? a.invoice.date;
-        final bTime = b.invoice.createdAt ?? b.invoice.date;
-        final timeOrder = aTime.compareTo(bTime);
-        if (timeOrder != 0) return timeOrder;
-        final dateOrder = a.invoice.date.compareTo(b.invoice.date);
-        if (dateOrder != 0) return dateOrder;
-        // Only meaningful within the same supplier.
-        if (a.supplier.toLowerCase() == b.supplier.toLowerCase()) {
-          final aNumber = int.tryParse(
-              a.invoice.number.replaceAll(RegExp(r'[^0-9]'), ''));
-          final bNumber = int.tryParse(
-              b.invoice.number.replaceAll(RegExp(r'[^0-9]'), ''));
-          if (aNumber != null && bNumber != null) {
-            final order = aNumber.compareTo(bNumber);
-            if (order != 0) return order;
-          }
-        }
-        return a.invoice.id.toString().compareTo(b.invoice.id.toString());
-      });
-      if (entries.length < 2) continue;
-      final latest = entries.last;
-      final previous = entries[entries.length - 2];
-      // Show only genuine price increases, for the same or different supplier.
-      if (latest.price - previous.price <= 0.000001) continue;
-      comparisons.add(_CrossSupplierComparison(
-        name: _simpleProductName(latest.name),
-        latest: latest,
-        previous: previous,
-      ));
-    }
-    comparisons.sort((a, b) {
-      final aTime = a.latest.invoice.createdAt ?? a.latest.invoice.date;
-      final bTime = b.latest.invoice.createdAt ?? b.latest.invoice.date;
-      return bTime.compareTo(aTime);
-    });
-
+    final groups = grouped.entries.where((e) =>
+        e.value.map((offer) => offer.supplier.toLowerCase()).toSet().length >= 2).toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       children: [
-        const Text('Price updates',
-            style: TextStyle(
-                fontSize: 28, letterSpacing: -0.8, fontWeight: FontWeight.w800)),
+        const Text('Compare suppliers',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
-        const Text(
-          'Only price increases · Swipe each receipt for details.',
-          style: TextStyle(color: AppColors.gray, fontSize: 14, height: 1.5),
-        ),
-        const SizedBox(height: 24),
-        if (comparisons.isEmpty)
+        const Text('Compare the latest unit prices of products shared by two or more suppliers. Price increases are shown when recorded.',
+            style: TextStyle(color: AppColors.gray)),
+        const SizedBox(height: 20),
+        if (groups.isEmpty)
           const EmptyState(
             icon: Icons.compare_arrows_rounded,
-            title: 'No price increases yet',
-            message: 'Products appear here when a newer matching price is higher than the previous one.',
+            title: 'No shared products yet',
+            message: 'Scan matching products from at least two suppliers to compare their latest unit prices.',
           )
         else
-          ...comparisons.map((comparison) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _PriceUpdateCard(comparison: comparison),
-              )),
+          ...groups.map((group) {
+            final offers = [...group.value]
+              ..sort((a, b) => a.price.compareTo(b.price));
+            final lowest = offers.first.price;
+            final highest = offers.last.price;
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              color: AppColors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(offers.first.product,
+                        style: const TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 12),
+                    ...offers.map((offer) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(offer.supplier)),
+                          Text('₱${offer.price.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: offer.price == lowest
+                                    ? AppColors.decrease : AppColors.black,
+                              )),
+                          if (offer.increase > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Text('+₱${offer.increase.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.decrease)),
+                            ),
+                          if (offer.price == lowest)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 8),
+                              child: Icon(Icons.check_circle_outline,
+                                  size: 17, color: AppColors.decrease),
+                            ),
+                        ],
+                      ),
+                    )),
+                    if (highest > lowest) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Save up to ₱${(highest - lowest).toStringAsFixed(2)} per unit with ${offers.first.supplier}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.decrease,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }),
       ],
     );
   }
-
 }
-
 class CreateSupplierDialog extends StatefulWidget {
   const CreateSupplierDialog({super.key});
-
   @override
   State<CreateSupplierDialog> createState() => _CreateSupplierDialogState();
 }
-
 class _CreateSupplierDialogState extends State<CreateSupplierDialog> {
   final _controller = TextEditingController();
-
   void _submit() {
     final value = _controller.text.trim();
     if (value.isNotEmpty) Navigator.of(context).pop(value);
   }
-
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -559,7 +595,6 @@ class _CreateSupplierDialogState extends State<CreateSupplierDialog> {
     );
   }
 }
-
 class SummaryCard extends StatelessWidget {
   const SummaryCard({
     super.key,
@@ -567,11 +602,9 @@ class SummaryCard extends StatelessWidget {
     required this.value,
     required this.icon,
   });
-
   final String label;
   final String value;
   final IconData icon;
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -601,12 +634,10 @@ class SummaryCard extends StatelessWidget {
     );
   }
 }
-
 class SupplierCard extends StatelessWidget {
   const SupplierCard({super.key, required this.supplier, required this.onTap});
   final Supplier supplier;
   final VoidCallback onTap;
-
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -643,7 +674,7 @@ class SupplierCard extends StatelessWidget {
                             fontSize: 15, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 5),
                     Text(
-                      '${supplier.invoices.length} ${supplier.invoices.length == 1 ? 'invoice' : 'invoices'}',
+                      '${_latestSupplierPrices(supplier).length} ${_latestSupplierPrices(supplier).length == 1 ? 'product' : 'products'}',
                       style: const TextStyle(color: AppColors.gray, fontSize: 12),
                     ),
                   ],
@@ -658,6 +689,77 @@ class SupplierCard extends StatelessWidget {
     );
   }
 }
+// Own text controllers inside the dialog, not in the caller. This avoids
+// disposing a TextField controller while the closing dialog still animates.
+class _ManualProductDialog extends StatefulWidget {
+  const _ManualProductDialog();
+
+  @override
+  State<_ManualProductDialog> createState() => _ManualProductDialogState();
+}
+
+class _ManualProductDialogState extends State<_ManualProductDialog> {
+  final _nameController = TextEditingController();
+  final _priceController = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _priceController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final name = _nameController.text.trim();
+    final price = double.tryParse(
+      _priceController.text.trim().replaceAll(',', ''),
+    );
+    if (name.isEmpty || price == null || !price.isFinite || price <= 0) {
+      setState(() => _error = 'Enter a product name and a price greater than zero.');
+      return;
+    }
+    Navigator.of(context).pop(ReceiptProduct(name: name, price: price));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add product'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Product description'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _priceController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Unit price', prefixText: '₱'),
+              onSubmitted: (_) => _save(),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Save')),
+      ],
+    );
+  }
+}
 
 class SupplierDetailPage extends StatefulWidget {
   const SupplierDetailPage({
@@ -667,14 +769,125 @@ class SupplierDetailPage extends StatefulWidget {
   });
   final Supplier supplier;
   final VoidCallback onChanged;
-
   @override
   State<SupplierDetailPage> createState() => _SupplierDetailPageState();
 }
-
 class _SupplierDetailPageState extends State<SupplierDetailPage> {
   final ImagePicker _picker = ImagePicker();
   bool _busy = false;
+  final TextEditingController _searchController = TextEditingController();
+  final Set<String> _selectedProductKeys = <String>{};
+  String _searchText = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addManualProduct() async {
+    try {
+      final product = await showDialog<ReceiptProduct>(
+        context: context,
+        builder: (_) => const _ManualProductDialog(),
+      );
+      if (!mounted || product == null) return;
+      setState(() => _busy = true);
+      // Manual entries use a normal receipt record so they survive restart and
+      // participate in the same latest-price comparison as scanned items.
+      final now = DateTime.now();
+      final receiptRow = await supabase.from('receipts').insert({
+        'supplier': widget.supplier.name,
+        'invoice_no': 'MANUAL-${now.microsecondsSinceEpoch}',
+        'receipt_date': now.toIso8601String().split('T').first,
+        'total': 0,
+        'image_path': '',
+      }).select().single();
+      final invoice = ReceiptInvoice(
+        id: receiptRow['id'],
+        number: (receiptRow['invoice_no'] ?? '').toString(),
+        date: now,
+        createdAt: DateTime.tryParse((receiptRow['created_at'] ?? '').toString()) ?? now,
+        total: 0,
+      );
+      await _insertReceiptProduct(invoice, product);
+      if (!mounted) return;
+      setState(() {
+        widget.supplier.invoices.add(invoice);
+      });
+      widget.onChanged();
+      _message('Product saved.');
+    } catch (error) {
+      _message('Could not add product. Check Supabase permissions.\n$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _removeSelectedProducts() async {
+    if (_selectedProductKeys.isEmpty) return;
+    final count = _selectedProductKeys.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Remove $count product${count == 1 ? '' : 's'}?'),
+        content: const Text(
+          'This permanently removes all saved price entries for the selected '
+          'products from this supplier, including their past prices. '
+          'The scanned receipt images will remain stored. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove permanently'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final selected = Set<String>.from(_selectedProductKeys);
+      final ids = <dynamic>[];
+      for (final invoice in widget.supplier.invoices) {
+        for (final product in invoice.products) {
+          if (selected.contains(_productComparisonKey(product.name))) {
+            if (product.id == null) {
+              throw StateError('A selected item has no database ID.');
+            }
+            ids.add(product.id);
+          }
+        }
+      }
+      // Delete database rows before updating the on-screen list.
+      for (final id in ids) {
+        final deleted = await supabase.from('receipt_items')
+            .delete().eq('id', id).select('id');
+        if (deleted.isEmpty) {
+          throw StateError('Delete was blocked for item $id. Check RLS.');
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        for (final invoice in widget.supplier.invoices) {
+          invoice.products.removeWhere(
+              (product) => selected.contains(_productComparisonKey(product.name)));
+        }
+        _selectedProductKeys.clear();
+      });
+      widget.onChanged();
+      _message('Removed $count product${count == 1 ? '' : 's'}.');
+    } catch (error) {
+      // Reload authoritative data if only part of the operation succeeded.
+      widget.onChanged();
+      _message('Could not remove all products. Refresh and check permissions.\n$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
 
   Future<void> _addInvoice() async {
     final source = await showModalBottomSheet<ImageSource>(
@@ -687,7 +900,7 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Add invoice',
+              const Text('Scan receipt',
                   style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
               const SizedBox(height: 6),
               const Text('Take a photo or choose an existing image.',
@@ -711,7 +924,6 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
       ),
     );
     if (source == null || !mounted) return;
-
     try {
       XFile? picked;
       try {
@@ -753,7 +965,6 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
       // assigned automatically when the photo is selected.
       final invoiceNumber = '#${_nextInvoiceNumber()}';
       final invoiceDate = DateTime.now();
-
       setState(() => _busy = true);
       final file = File(scanPath);
       final storagePath =
@@ -766,7 +977,6 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
               contentType: _contentTypeFor(scanPath),
             ),
           );
-
       try {
         final row = await supabase.from('receipts').insert({
           'supplier': widget.supplier.name,
@@ -775,7 +985,6 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
           'total': 0,
           'image_path': storagePath,
         }).select().single();
-
         final invoice = ReceiptInvoice(
           id: row['id'],
           number: (row['invoice_no'] ?? invoiceNumber).toString(),
@@ -799,12 +1008,11 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
         rethrow;
       }
     } catch (error) {
-      _message('Could not add invoice. Check schema, bucket access, and RLS.\n$error');
+      _message('Could not scan receipt. Check schema, bucket access, and RLS.\n$error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
-
   Future<void> _scanAndReviewProducts(
     String imagePath,
     ReceiptInvoice invoice,
@@ -817,16 +1025,13 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
       }
       final result = await ocr.scanFile(imagePath);
       if (!mounted) return;
-
       if (result.products.isEmpty) {
         final details = result.warnings.isEmpty
             ? 'No products were detected. You can add them manually.'
             : result.warnings.join('\n');
         _message('OCR could not identify product rows. $details');
-        _openInvoice(invoice);
         return;
       }
-
       final reviewed = await showDialog<List<ReceiptProduct>>(
         context: context,
         barrierDismissible: false,
@@ -836,7 +1041,6 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
         ),
       );
       if (!mounted) return;
-
       if (reviewed != null && reviewed.isNotEmpty) {
         setState(() => _busy = true);
         var savedCount = 0;
@@ -849,17 +1053,15 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
       } else {
         _message('No OCR products saved. You can add products manually.');
       }
-      _openInvoice(invoice);
+      if (mounted) setState(() {});
     } catch (error) {
       if (!mounted) return;
       _message('Could not read this image with OCR. You can add products manually.\n$error');
-      _openInvoice(invoice);
     } finally {
       await ocr.dispose();
       if (mounted) setState(() => _busy = false);
     }
   }
-
   Future<void> _insertReceiptProduct(
     ReceiptInvoice invoice,
     ReceiptProduct product,
@@ -894,7 +1096,6 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
     // Invoice totals are intentionally not calculated or written. Receiptly
     // tracks individual unit prices only.
   }
-
   int _nextInvoiceNumber() {
     var highest = 0;
     for (final invoice in widget.supplier.invoices) {
@@ -904,15 +1105,12 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
     }
     return highest + 1;
   }
-
   String _safeFileName(String value) =>
       value.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-
   String _extensionFor(String path) {
     final ext = path.split('.').last.toLowerCase();
     return ['png', 'webp', 'heic', 'jpg', 'jpeg'].contains(ext) ? '.$ext' : '.jpg';
   }
-
   String _contentTypeFor(String path) {
     switch (path.split('.').last.toLowerCase()) {
       case 'png': return 'image/png';
@@ -921,31 +1119,17 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
       default: return 'image/jpeg';
     }
   }
-
   void _message(String value) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value)));
   }
-
-  void _openInvoice(ReceiptInvoice invoice) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => InvoiceDetailPage(
-          supplier: widget.supplier,
-          invoice: invoice,
-          onChanged: widget.onChanged,
-        ),
-      ),
-    ).then((_) {
-      if (mounted) setState(() {});
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    final invoices = [...widget.supplier.invoices]
-      ..sort((a, b) => b.date.compareTo(a.date));
+    final products = _latestSupplierPrices(widget.supplier);
+    final visible = products.where((product) =>
+        product.name.toLowerCase().contains(_searchText.toLowerCase())).toList();
+    final allVisibleSelected = visible.isNotEmpty &&
+        visible.every((product) => _selectedProductKeys.contains(product.key));
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.supplier.name,
@@ -956,603 +1140,161 @@ class _SupplierDetailPageState extends State<SupplierDetailPage> {
         backgroundColor: AppColors.orange,
         foregroundColor: AppColors.white,
         icon: _busy
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white),
-              )
+            ? const SizedBox(width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
             : const Icon(Icons.document_scanner_outlined),
-        label: Text(_busy ? 'Saving...' : 'Scan invoice'),
+        label: Text(_busy ? 'Saving...' : 'Scan receipt'),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: AppColors.black,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('SUPPLIER FOLDER',
-                          style: TextStyle(
-                              color: AppColors.lightGray,
-                              fontSize: 10,
-                              letterSpacing: 1.4,
-                              fontWeight: FontWeight.w700)),
-                      SizedBox(height: 8),
-                      Text('Your invoice history.',
-                          style: TextStyle(
-                              color: AppColors.white,
-                              fontSize: 19,
-                              fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                ),
-                Icon(Icons.folder_special_outlined,
-                    size: 36, color: AppColors.orange),
-              ],
-            ),
-          ),
-          const SizedBox(height: 26),
-          Text('Invoices (${invoices.length})',
-              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text('${products.length} products · Latest recorded prices',
+              style: const TextStyle(color: AppColors.gray)),
           const SizedBox(height: 14),
-          if (invoices.isEmpty)
-            const EmptyState(
-              icon: Icons.receipt_long_outlined,
-              title: 'No invoices yet',
-              message: 'Scan a receipt or invoice to start tracking this supplier’s prices.',
-            )
-          else
-            ...invoices.map((invoice) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: InvoiceCard(
-                    invoice: invoice,
-                    onTap: () => _openInvoice(invoice),
-                  ),
-                )),
-        ],
-      ),
-    );
-  }
-}
-
-class InvoiceCard extends StatelessWidget {
-  const InvoiceCard({super.key, required this.invoice, required this.onTap});
-  final ReceiptInvoice invoice;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.white,
-      borderRadius: BorderRadius.circular(17),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(17),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(17),
+          TextField(
+            controller: _searchController,
+            onChanged: (value) => setState(() => _searchText = value),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: 'Search products',
+              suffixIcon: _searchText.isEmpty ? null : IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _searchText = '');
+                },
+              ),
+            ),
           ),
-          child: Row(
+          const SizedBox(height: 10),
+          Row(
             children: [
-              Container(
-                width: 45,
-                height: 49,
-                decoration: BoxDecoration(
-                  color: AppColors.background,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.receipt_long_outlined,
-                    color: AppColors.darkGray),
+              Checkbox(
+                value: allVisibleSelected,
+                onChanged: _busy || visible.isEmpty ? null : (checked) {
+                  setState(() {
+                    for (final product in visible) {
+                      if (checked == true) {
+                        _selectedProductKeys.add(product.key);
+                      } else {
+                        _selectedProductKeys.remove(product.key);
+                      }
+                    }
+                  });
+                },
               ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Invoice ${invoice.number}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 14)),
-                    const SizedBox(height: 5),
-                    Text(formatDate(invoice.date),
-                        style: const TextStyle(
-                            color: AppColors.gray, fontSize: 12)),
-                    const SizedBox(height: 5),
-                    Text('${invoice.products.length} products',
-                        style: const TextStyle(
-                            color: AppColors.lightGray, fontSize: 11)),
-                  ],
+              Expanded(child: Text('${_selectedProductKeys.length} selected',
+                  style: const TextStyle(fontSize: 12, color: AppColors.gray))),
+              if (_selectedProductKeys.isNotEmpty)
+                IconButton(
+                  tooltip: 'Remove selected products',
+                  onPressed: _busy ? null : _removeSelectedProducts,
+                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.red),
                 ),
+              TextButton.icon(
+                onPressed: _busy ? null : _addManualProduct,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add row'),
               ),
-              const Icon(Icons.chevron_right_rounded,
-                  color: AppColors.lightGray),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class InvoiceDetailPage extends StatefulWidget {
-  const InvoiceDetailPage({
-    super.key,
-    required this.supplier,
-    required this.invoice,
-    required this.onChanged,
-  });
-  final Supplier supplier;
-  final ReceiptInvoice invoice;
-  final VoidCallback onChanged;
-
-  @override
-  State<InvoiceDetailPage> createState() => _InvoiceDetailPageState();
-}
-
-class _InvoiceDetailPageState extends State<InvoiceDetailPage> {
-  bool _saving = false;
-
-  Future<void> _addProduct() async {
-    final product = await showDialog<ReceiptProduct>(
-      context: context,
-      builder: (_) => const AddProductDialog(),
-    );
-    if (product == null || !mounted) return;
-    setState(() => _saving = true);
-    try {
-      Map<String, dynamic>? row;
-      Object? lastInsertError;
-      // Existing projects use different naming conventions for these two fields.
-      // Try common variants; PostgREST rejects unknown columns without saving a row.
-      for (final nameColumn in ['name', 'product_name', 'item_name', 'product']) {
-        for (final priceColumn in ['unit_price', 'price', 'item_price', 'amount']) {
-          try {
-            row = await supabase.from('receipt_items').insert({
-              'receipt_id': widget.invoice.id,
-              nameColumn: product.name,
-              priceColumn: product.price,
-              'unit': 'unit',
-              'quantity': 1,
-            }).select().single();
-            break;
-          } catch (error) {
-            lastInsertError = error;
-          }
-        }
-        if (row != null) break;
-      }
-      if (row == null) throw Exception('Could not insert receipt item. Verify receipt_items columns and RLS. $lastInsertError');
-      final saved = ReceiptProduct(
-        id: row['id'],
-        name: _itemNameFromRow(row, product.name),
-        price: _itemPriceFromRow(row, product.price),
-      );
-      if (!mounted) return;
-      setState(() {
-        widget.invoice.products.add(saved);
-      });
-      await _persistPriceComparisonItems();
-      widget.onChanged();
-    } catch (error) {
-      _message('Could not save product. Check receipt_items columns and RLS.\n$error');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _removeProduct(ReceiptProduct product) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Remove product?'),
-        content: Text(
-          'Are you sure you want to remove "${product.name}" from this invoice?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.orange,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    try {
-      if (product.id != null) {
-        await supabase.from('receipt_items').delete().eq('id', product.id);
-      }
-      if (!mounted) return;
-      setState(() {
-        widget.invoice.products.remove(product);
-      });
-      await _persistPriceComparisonItems();
-      widget.onChanged();
-    } catch (error) {
-      _message('Could not remove product.\n$error');
-    }
-  }
-
-  Future<void> _persistPriceComparisonItems() async {
-    try {
-      final receipts = await supabase
-          .from('receipts')
-          .select('id,supplier,receipt_date,invoice_no')
-          .eq('supplier', widget.supplier.name)
-          .order('receipt_date', ascending: false)
-          .limit(2);
-      if (receipts.isEmpty) return;
-      final ids = receipts.map((r) => r['id']).toList();
-      final itemRows = await supabase
-          .from('receipt_items')
-          .select('receipt_id,code,name,unit,quantity,unit_price')
-          .inFilter('receipt_id', ids);
-
-      // Keep the comparison table aligned with the latest two invoices.
-      await supabase
-          .from('price_comparison_items')
-          .delete()
-          .eq('supplier', widget.supplier.name);
-      final receiptById = <String, Map<String, dynamic>>{
-        for (final receipt in receipts) receipt['id'].toString(): receipt,
-      };
-      final rows = <Map<String, dynamic>>[];
-      for (final item in itemRows) {
-        final receipt = receiptById[(item['receipt_id'] ?? '').toString()];
-        if (receipt == null) continue;
-        rows.add({
-          'receipt_id': item['receipt_id'],
-          'code': item['code'],
-          'name': item['name'],
-          'unit': item['unit'] ?? 'unit',
-          'quantity': item['quantity'] ?? 1,
-          'unit_price': item['unit_price'],
-          'supplier': receipt['supplier'],
-          'receipt_date': receipt['receipt_date'],
-          'invoice_no': receipt['invoice_no'],
-        });
-      }
-      if (rows.isNotEmpty) {
-        await supabase.from('price_comparison_items').insert(rows);
-      }
-    } catch (error) {
-      // Product saving should remain successful even if comparison-table RLS
-      // has not been configured yet. Surface this only in debug logs.
-      debugPrint('Could not refresh price comparison items: $error');
-    }
-  }
-
-  void _message(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final invoice = widget.invoice;
-    final imageProvider = invoice.imageUrl != null
-        ? NetworkImage(invoice.imageUrl!)
-        : invoice.imagePath != null && File(invoice.imagePath!).existsSync()
-            ? FileImage(File(invoice.imagePath!)) as ImageProvider
-            : null;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Invoice details',
-            style: TextStyle(fontWeight: FontWeight.w800)),
-        actions: [
-          IconButton(
-            tooltip: 'Add product',
-            onPressed: _saving ? null : _addProduct,
-            icon: const Icon(Icons.add_circle_outline_rounded),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _saving ? null : _addProduct,
-        backgroundColor: AppColors.orange,
-        foregroundColor: AppColors.white,
-        icon: _saving
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white),
-              )
-            : const Icon(Icons.add_rounded),
-        label: Text(_saving ? 'Saving...' : 'Add product'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-        children: [
-          if (imageProvider != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Material(
-                color: AppColors.white,
-                child: InkWell(
-                  onTap: () => _showFullImage(context, imageProvider),
-                  child: Stack(
-                    alignment: Alignment.bottomRight,
-                    children: [
-                      Image(
-                        image: imageProvider,
-                        height: 190,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _imageUnavailable(),
-                      ),
-                      Container(
-                        margin: const EdgeInsets.all(10),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.62),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.zoom_out_map_rounded, size: 14, color: Colors.white),
-                            SizedBox(width: 5),
-                            Text('View image', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+          const SizedBox(height: 8),
+          if (products.isEmpty)
+            const EmptyState(
+              icon: Icons.inventory_2_outlined,
+              title: 'No products yet',
+              message: 'Scan a delivery receipt or add a product manually.',
+            )
+          else if (visible.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: Text('No matching products.')),
             )
           else
-            _imageUnavailable(),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
+            Card(
               color: AppColors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              children: [
-                const Icon(Icons.storefront_outlined,
-                    size: 28, color: AppColors.orange),
-                const SizedBox(height: 10),
-                Text(widget.supplier.name.toUpperCase(),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1)),
-                const SizedBox(height: 6),
-                const Text('INVOICE',
-                    style: TextStyle(
-                        color: AppColors.gray, letterSpacing: 2, fontSize: 11)),
-                const SizedBox(height: 20),
-                const Divider(),
-                const SizedBox(height: 12),
-                ReceiptInfoRow(label: 'Invoice', value: invoice.number),
-                const SizedBox(height: 10),
-                ReceiptInfoRow(
-                    label: 'Invoice date', value: formatDate(invoice.date)),
-                const SizedBox(height: 18),
-                const Divider(),
-                const SizedBox(height: 15),
-                Row(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Column(
                   children: [
-                    Expanded(
-                      child: Text('PRODUCTS (${invoice.products.length})',
-                          style: const TextStyle(
-                              fontSize: 10,
-                              color: AppColors.gray,
-                              letterSpacing: 1,
-                              fontWeight: FontWeight.w700)),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 36),
+                          Expanded(flex: 5, child: Text('PRODUCT',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                          Expanded(flex: 2, child: Text('PRICE',
+                              textAlign: TextAlign.end,
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                          Expanded(flex: 2, child: Text('INCREASE',
+                              textAlign: TextAlign.end,
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    const SizedBox(
-                      width: 68,
-                      child: Text('UNIT PRICE',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                              fontSize: 9,
-                              color: AppColors.gray,
-                              letterSpacing: .4,
-                              fontWeight: FontWeight.w700)),
-                    ),
-                    const SizedBox(width: 28),
+                    const Divider(height: 1),
+                    ...visible.map((product) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 36, child: Checkbox(
+                            value: _selectedProductKeys.contains(product.key),
+                            onChanged: _busy ? null : (checked) {
+                              setState(() {
+                                if (checked == true) {
+                                  _selectedProductKeys.add(product.key);
+                                } else {
+                                  _selectedProductKeys.remove(product.key);
+                                }
+                              });
+                            },
+                            visualDensity: VisualDensity.compact,
+                          )),
+                          Expanded(flex: 5, child: Text(product.name,
+                              style: const TextStyle(fontSize: 12))),
+                          Expanded(flex: 2, child: Text(
+                              '₱${product.price.toStringAsFixed(2)}',
+                              textAlign: TextAlign.end,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
+                          Expanded(flex: 2, child: Text(
+                              product.previous != null && product.price > product.previous!
+                                  ? '+₱${(product.price - product.previous!).toStringAsFixed(2)}'
+                                  : '—',
+                              textAlign: TextAlign.end,
+                              style: TextStyle(fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: product.previous != null &&
+                                          product.price > product.previous!
+                                      ? AppColors.decrease : AppColors.gray))),
+                        ],
+                      ),
+                    )),
                   ],
                 ),
-                const SizedBox(height: 15),
-                if (invoice.products.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 22),
-                    child: Text(
-                      'No products added yet.\nAdd items from this invoice below.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.gray, height: 1.5),
-                    ),
-                  )
-                else
-                  ...invoice.products.asMap().entries.map(
-                    (entry) {
-                      final index = entry.key;
-                      final product = entry.value;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 22,
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  '${index + 1}.',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppColors.lightGray,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Text(product.name,
-                                  style: const TextStyle(fontSize: 12.5, height: 1.35)),
-                            ),
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              width: 68,
-                              child: Text(
-                                formatPeso(product.price),
-                                textAlign: TextAlign.right,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700, fontSize: 12),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 28,
-                              height: 22,
-                              child: Align(
-                                alignment: Alignment.topCenter,
-                                child: InkWell(
-                                  onTap: _saving
-                                      ? null
-                                      : () => _removeProduct(product),
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: const Padding(
-                                    padding: EdgeInsets.only(top: 1),
-                                    child: Icon(
-                                      Icons.close_rounded,
-                                      size: 17,
-                                      color: AppColors.lightGray,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                const Divider(),
-                const SizedBox(height: 14),
-                const Text('Thank you for your business.',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.lightGray,
-                        fontStyle: FontStyle.italic)),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Review product descriptions and unit prices carefully. You can add or remove products at any time.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                color: AppColors.gray, fontSize: 11, height: 1.5),
-          ),
         ],
       ),
     );
   }
 
-  void _showFullImage(BuildContext context, ImageProvider imageProvider) {
-    showDialog<void>(
-      context: context,
-      barrierColor: Colors.black,
-      builder: (dialogContext) => Dialog.fullscreen(
-        backgroundColor: Colors.black,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Center(
-                child: InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 5,
-                  child: Image(
-                    image: imageProvider,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Text(
-                      'Unable to load receipt image',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 18,
-              right: 16,
-              child: SafeArea(
-                child: IconButton.filledTonal(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.white.withValues(alpha: 0.16),
-                    foregroundColor: Colors.white,
-                  ),
-                  icon: const Icon(Icons.close_rounded),
-                  tooltip: 'Close image',
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _imageUnavailable() => Container(
-        height: 120,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: const Text('Receipt image unavailable'),
-      );
 }
-
 class OcrReviewDialog extends StatefulWidget {
   const OcrReviewDialog({
     super.key,
     required this.products,
     required this.warnings,
   });
-
   final List<ReceiptOcrProduct> products;
   final List<String> warnings;
-
   @override
   State<OcrReviewDialog> createState() => _OcrReviewDialogState();
 }
-
 class _OcrReviewDialogState extends State<OcrReviewDialog> {
   late final List<TextEditingController> _nameControllers;
   late final List<TextEditingController> _priceControllers;
   String? _validationMessage;
-
   @override
   void initState() {
     super.initState();
@@ -1565,7 +1307,6 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
             ))
         .toList();
   }
-
   @override
   void dispose() {
     for (final controller in _nameControllers) {
@@ -1576,21 +1317,18 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
     }
     super.dispose();
   }
-
   void _removeRow(int index) {
     setState(() {
       _nameControllers.removeAt(index).dispose();
       _priceControllers.removeAt(index).dispose();
     });
   }
-
   void _addRow() {
     setState(() {
       _nameControllers.add(TextEditingController());
       _priceControllers.add(TextEditingController());
     });
   }
-
   void _save() {
     final reviewed = <ReceiptProduct>[];
     for (var i = 0; i < _nameControllers.length; i++) {
@@ -1611,7 +1349,6 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
     }
     Navigator.of(context).pop(reviewed);
   }
-
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.sizeOf(context).height;
@@ -1876,126 +1613,135 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
     );
   }
 }
-
-class AddProductDialog extends StatefulWidget {
-  const AddProductDialog({super.key});
-
+// A confirmation-only alias manager. Saving never modifies receipt rows;
+// it changes the comparison key used for latest prices and supplier matches.
+class _AliasManagerDialog extends StatefulWidget {
+  const _AliasManagerDialog();
   @override
-  State<AddProductDialog> createState() => _AddProductDialogState();
+  State<_AliasManagerDialog> createState() => _AliasManagerDialogState();
 }
-
-class _AddProductDialogState extends State<AddProductDialog> {
-  final _nameController = TextEditingController();
-  final _priceController = TextEditingController();
-
+class _AliasManagerDialogState extends State<_AliasManagerDialog> {
+  final _alias = TextEditingController();
+  final _canonical = TextEditingController();
+  bool _saving = false;
+  bool _changed = false;
+  String? _error;
   @override
   void dispose() {
-    _nameController.dispose();
-    _priceController.dispose();
+    _alias.dispose();
+    _canonical.dispose();
     super.dispose();
   }
-
-  void _submit() {
-    final name = _nameController.text.trim();
-    final price =
-        double.tryParse(_priceController.text.trim().replaceAll(',', ''));
-    if (name.isEmpty || price == null || price < 0) return;
-    Navigator.pop(context, ReceiptProduct(name: name, price: price));
+  Future<void> _save() async {
+    final a = _normalizedProductName(_alias.text);
+    final c = _productComparisonKey(_canonical.text);
+    if (a.isEmpty || c.isEmpty || a == c) {
+      setState(() => _error = 'Enter two different names for the exact same product.');
+      return;
+    }
+    setState(() { _saving = true; _error = null; });
+    try {
+      await supabase.from('product_aliases').upsert({
+        'alias_key': a,
+        'canonical_key': c,
+      }, onConflict: 'alias_key');
+      _confirmedProductAliases[a] = c;
+      _alias.clear();
+      _canonical.clear();
+      if (mounted) setState(() => _changed = true);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not save alias: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
-
+  Future<void> _remove(String alias) async {
+    setState(() => _saving = true);
+    try {
+      await supabase.from('product_aliases').delete().eq('alias_key', alias);
+      _confirmedProductAliases.remove(alias);
+      if (mounted) setState(() => _changed = true);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not remove alias: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
   @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppColors.white,
-      surfaceTintColor: Colors.transparent,
-      elevation: 12,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
-      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-      contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-      title: const Text('Add product',
-          style: TextStyle(fontSize: 22, letterSpacing: -0.5, fontWeight: FontWeight.w700)),
-      content: Column(
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Product aliases'),
+    content: SizedBox(
+      width: 430,
+      child: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            controller: _nameController,
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-                labelText: 'Product name', hintText: 'e.g. Nova'),
+          const Text('Only merge the same brand, flavor, size and pack. '
+              'Confirmed aliases apply across all suppliers.',
+              style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 12),
+          TextField(controller: _alias,
+              decoration: const InputDecoration(labelText: 'Alternate receipt name',
+                  hintText: 'CHPY BBQ 110 GR')),
+          const SizedBox(height: 10),
+          TextField(controller: _canonical,
+              decoration: const InputDecoration(labelText: 'Correct product name',
+                  hintText: 'CHIPPY BBQ 110G')),
+          if (_error != null) Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _priceController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-                labelText: 'Unit price (₱)',
-                hintText: 'e.g. 8.00',
-                prefixText: '₱ '),
-            onSubmitted: (_) => _submit(),
-          ),
+          FilledButton(onPressed: _saving ? null : _save,
+              child: const Text('Confirm same product')),
+          const Divider(height: 26),
+          ..._confirmedProductAliases.entries.map((e) => ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(e.key, style: const TextStyle(fontSize: 12)),
+            subtitle: Text('→ ${e.value}', style: const TextStyle(fontSize: 12)),
+            trailing: IconButton(
+              tooltip: 'Remove alias',
+              onPressed: _saving ? null : () => _remove(e.key),
+              icon: const Icon(Icons.close_rounded),
+            ),
+          )),
         ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          style: TextButton.styleFrom(foregroundColor: AppColors.gray, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13)),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          style: FilledButton.styleFrom(backgroundColor: AppColors.orange, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-          child: const Text('Add product'),
-        ),
-      ],
-    );
-  }
-}
-
-class ReceiptInfoRow extends StatelessWidget {
-  const ReceiptInfoRow({super.key, required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(label,
-              style: const TextStyle(color: AppColors.gray, fontSize: 12)),
-        ),
-        Text(value,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-      ],
-    );
-  }
-}
-
-class PriceChange {
-  const PriceChange({
-    required this.name,
-    required this.previous,
-    required this.current,
-  });
-  final String name;
-  final double previous;
-  final double current;
-  double get difference => current - previous;
+      )),
+    ),
+    actions: [TextButton(
+      onPressed: () => Navigator.pop(context, _changed),
+      child: const Text('Done'),
+    )],
+  );
 }
 
 // Confirm supplier-specific aliases here. Only put descriptions that you
 // have verified are exactly the same product, variant, and pack size.
 // Example: 'chpy bbq 27g': 'chippy bbq 27g',
-const Map<String, String> _confirmedProductAliases = {
-  // Add verified alternate descriptions here, keyed by normalized name.
-  // Do not equate single sachets with promotional multipacks.
-};
+final Map<String, String> _confirmedProductAliases = {};
 
+Future<void> _loadConfirmedAliases() async {
+  final rows = await supabase.from('product_aliases')
+      .select('alias_key, canonical_key');
+  _confirmedProductAliases
+    ..clear()
+    ..addEntries(rows.map((row) => MapEntry(
+      row['alias_key'].toString(), row['canonical_key'].toString())));
+}
+
+// Case/punctuation, GR/G and BBQ/BARBECUE are safe lexical changes.
+// CHPY/CHIPPY requires an explicit saved alias.
+String _standardizeProductTerms(String name) {
+  var text = name.toLowerCase();
+  text = text.replaceAll(RegExp(r'\bbarbecue\b'), 'bbq');
+  text = text.replaceAll(RegExp(r'\bbarbeque\b'), 'bbq');
+  text = text.replaceAll(RegExp(r'(\d)\s*(?:grams?|grms?|gr)\b'), r'$1g');
+  text = text.replaceAll(RegExp(r'\bgrams?\b'), 'g');
+  return text;
+}
 String _normalizedProductName(String name) {
-  var normalized = name.toLowerCase()
+  var normalized = _standardizeProductTerms(name)
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
@@ -2004,458 +1750,58 @@ String _normalizedProductName(String name) {
   normalized = normalized.replaceFirst(RegExp(r'^(m1|mi)\s+'), '');
   return normalized;
 }
-
 String _productComparisonKey(String name) {
   final normalized = _normalizedProductName(name);
   return _confirmedProductAliases[normalized] ?? normalized;
 }
-
-String _simpleProductName(String name) {
-  final words = _normalizedProductName(name).split(' ');
-  return words.where((word) => word.isNotEmpty).map((word) {
-    if (RegExp(r'^\d+(g|kg|ml|l|pcs)$').hasMatch(word)) return word;
-    return word[0].toUpperCase() + word.substring(1);
-  }).join(' ');
-}
-
-class _CrossSupplierPrice {
-  const _CrossSupplierPrice({
-    required this.name,
-    required this.price,
-    required this.supplier,
-    required this.invoice,
-  });
+class _LatestSupplierProduct {
+  const _LatestSupplierProduct(this.key, this.name, this.price, this.previous);
+  final String key;
   final String name;
   final double price;
+  final double? previous;
+}
+class _SupplierLatestPrice {
+  const _SupplierLatestPrice(this.supplier, this.product, this.price, this.increase);
   final String supplier;
-  final ReceiptInvoice invoice;
-}
-
-class _CrossSupplierComparison {
-  const _CrossSupplierComparison({
-    required this.name,
-    required this.latest,
-    required this.previous,
-  });
-  final String name;
-  final _CrossSupplierPrice latest;
-  final _CrossSupplierPrice previous;
-}
-
-class _PriceUpdateCard extends StatelessWidget {
-  const _PriceUpdateCard({required this.comparison});
-  final _CrossSupplierComparison comparison;
-
-  @override
-  Widget build(BuildContext context) {
-    final difference = comparison.latest.price - comparison.previous.price;
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 9),
-            child: Row(
-              children: [
-                const Icon(Icons.receipt_long_outlined,
-                    size: 16, color: AppColors.gray),
-                const SizedBox(width: 7),
-                const Expanded(
-                  child: Text('PRICE CHANGE RECEIPT',
-                    style: TextStyle(fontSize: 10, letterSpacing: 1.1,
-                        color: AppColors.gray, fontWeight: FontWeight.w800)),
-                ),
-                Text('+${formatPeso(difference)}',
-                  style: const TextStyle(color: Color(0xFF18794E),
-                      fontSize: 14, fontWeight: FontWeight.w800)),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          // Swipe left to see both invoices without squeezing the details.
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              child: SizedBox(
-                width: 560,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(comparison.name, maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14,
-                          fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 11),
-                    Row(
-                      children: [
-                        _receiptPriceColumn('PREVIOUS', comparison.previous),
-                        const SizedBox(width: 12),
-                        const Icon(Icons.arrow_forward_rounded,
-                            size: 15, color: AppColors.lightGray),
-                        const SizedBox(width: 12),
-                        _receiptPriceColumn('LATEST', comparison.latest),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 0, 14, 9),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text('Swipe for invoice details',
-                  style: TextStyle(fontSize: 10, color: AppColors.lightGray)),
-                SizedBox(width: 3),
-                Icon(Icons.swipe_left_rounded,
-                    size: 13, color: AppColors.lightGray),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _receiptPriceColumn(String heading, _CrossSupplierPrice record) {
-    return SizedBox(
-      width: 260,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(heading, style: const TextStyle(
-            fontSize: 10, color: AppColors.lightGray,
-            letterSpacing: .8, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 5),
-          Text(record.supplier, maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13,
-                fontWeight: FontWeight.w700)),
-          const SizedBox(height: 3),
-          Text('Invoice #${record.invoice.number}  •  ${formatDate(record.invoice.date)}',
-            maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: AppColors.gray)),
-          const SizedBox(height: 7),
-          Text('Unit price  ${formatPeso(record.price)}',
-            style: const TextStyle(fontSize: 13,
-                fontWeight: FontWeight.w800)),
-        ],
-      ),
-    );
-  }
-}
-
-class SupplierComparison extends StatelessWidget {
-  const SupplierComparison({super.key, required this.supplier});
-  final Supplier supplier;
-
-  @override
-  Widget build(BuildContext context) {
-    final invoices = [...supplier.invoices]
-      ..sort((a, b) => a.date.compareTo(b.date));
-
-    // Keep every product ever recorded, and compare its two most recent
-    // observed prices regardless of whether those prices are in adjacent invoices.
-    final historyByName = <String, List<_ProductPriceSnapshot>>{};
-    for (final invoice in invoices) {
-      for (final product in invoice.products) {
-        final key = product.name.trim().toLowerCase();
-        if (key.isEmpty) continue;
-        historyByName.putIfAbsent(key, () => <_ProductPriceSnapshot>[]).add(
-              _ProductPriceSnapshot(
-                name: product.name,
-                price: product.price,
-                invoice: invoice,
-              ),
-            );
-      }
-    }
-
-    final histories = historyByName.values.toList()
-      ..sort((a, b) => a.last.name.toLowerCase().compareTo(b.last.name.toLowerCase()));
-
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.orange.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: const Icon(Icons.storefront_outlined,
-                    color: AppColors.orange),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(supplier.name,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w800)),
-              ),
-              Text('${histories.length} items',
-                  style: const TextStyle(color: AppColors.gray, fontSize: 11)),
-            ],
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            'Swipe horizontally to view all price columns.',
-            style: TextStyle(color: AppColors.lightGray, fontSize: 10),
-          ),
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              // Keep the table wider than a typical phone screen even when
-              // previous-price values have not been recorded yet.
-              width: 470,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      SizedBox(
-                        width: 220,
-                        child: Text('PRODUCT',
-                            style: TextStyle(
-                                color: AppColors.gray,
-                                fontSize: 9,
-                                letterSpacing: .7,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                      SizedBox(width: 18),
-                      SizedBox(
-                        width: 100,
-                        child: Text('LAST PRICE',
-                            textAlign: TextAlign.end,
-                            style: TextStyle(
-                                color: AppColors.gray,
-                                fontSize: 9,
-                                letterSpacing: .4,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                      SizedBox(width: 20),
-                      SizedBox(
-                        width: 112,
-                        child: Text('PREVIOUS',
-                            textAlign: TextAlign.end,
-                            style: TextStyle(
-                                color: AppColors.gray,
-                                fontSize: 9,
-                                letterSpacing: .4,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  const Divider(),
-                  if (histories.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child: Text(
-                        'No product prices recorded yet.',
-                        style: TextStyle(color: AppColors.gray, fontSize: 13),
-                      ),
-                    ),
-                  ...histories.map((history) {
-                      final latest = history.last;
-                      final previous = history.length >= 2
-                          ? history[history.length - 2]
-                          : null;
-                      final change = previous == null
-                          ? null
-                          : PriceChange(
-                              name: latest.name,
-                              previous: previous.price,
-                              current: latest.price,
-                            );
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: 220,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(latest.name,
-                                      softWrap: true,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 12)),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    formatDate(latest.invoice.date),
-                                    style: const TextStyle(
-                                        color: AppColors.lightGray,
-                                        fontSize: 10),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 18),
-                            SizedBox(
-                              width: 100,
-                              child: Text(
-                                formatPeso(latest.price),
-                                textAlign: TextAlign.end,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w800, fontSize: 11),
-                              ),
-                            ),
-                            const SizedBox(width: 20),
-                            SizedBox(
-                              width: 112,
-                              child: previous == null
-                                  ? const Text('New',
-                                      textAlign: TextAlign.end,
-                                      style: TextStyle(
-                                          color: AppColors.gray, fontSize: 10))
-                                  : Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          formatPeso(previous.price),
-                                          textAlign: TextAlign.end,
-                                          style: const TextStyle(
-                                              color: AppColors.gray,
-                                              fontSize: 11),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        if (change != null)
-                                          ChangeIndicator(change: change),
-                                      ],
-                                    ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Each product uses its latest recorded price and the previous recorded price, even when other invoices are missing that product.',
-            style: TextStyle(
-                fontSize: 10, color: AppColors.lightGray, height: 1.4),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProductPriceSnapshot {
-  const _ProductPriceSnapshot({
-    required this.name,
-    required this.price,
-    required this.invoice,
-  });
-
-  final String name;
+  final String product;
   final double price;
-  final ReceiptInvoice invoice;
+  final double increase;
 }
-
-class InvoiceDateLabel extends StatelessWidget {
-  const InvoiceDateLabel({super.key, required this.label, required this.invoice});
-  final String label;
-  final ReceiptInvoice invoice;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(11),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  color: AppColors.gray,
-                  fontSize: 9,
-                  letterSpacing: 1,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: 5),
-          Text(formatDate(invoice.date),
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-          Text(invoice.number,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.gray, fontSize: 10)),
-        ],
-      ),
-    );
+List<_LatestSupplierProduct> _latestSupplierPrices(Supplier supplier) {
+  // Retain receipt history internally, but display one latest price per item.
+  final invoices = [...supplier.invoices]..sort((a, b) {
+    final at = a.createdAt ?? a.date;
+    final bt = b.createdAt ?? b.date;
+    final comparison = at.compareTo(bt);
+    if (comparison != 0) return comparison;
+    return a.id.toString().compareTo(b.id.toString());
+  });
+  final history = <String, List<ReceiptProduct>>{};
+  for (final invoice in invoices) {
+    // Last occurrence per receipt, to avoid duplicates within one scan.
+    final items = <String, ReceiptProduct>{};
+    for (final product in invoice.products) {
+      if (product.name.trim().isEmpty || product.price <= 0) continue;
+      final key = _productComparisonKey(product.name);
+      if (key.isEmpty) continue;
+      items[key] = product;
+    }
+    for (final entry in items.entries) {
+      history.putIfAbsent(entry.key, () => []).add(entry.value);
+    }
   }
-}
-
-class ChangeIndicator extends StatelessWidget {
-  const ChangeIndicator({super.key, required this.change});
-  final PriceChange change;
-
-  @override
-  Widget build(BuildContext context) {
-    final difference = change.difference;
-    final color = difference > 0
-        ? AppColors.orange
-        : difference < 0
-            ? AppColors.decrease
-            : AppColors.gray;
-    final icon = difference > 0
-        ? Icons.arrow_upward_rounded
-        : difference < 0
-            ? Icons.arrow_downward_rounded
-            : Icons.remove_rounded;
-    final label = difference == 0
-        ? '₱0.00'
-        : '${difference > 0 ? '+' : '-'}${formatPeso(difference.abs())}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
+  return [
+    for (final entry in history.entries)
+      _LatestSupplierProduct(
+        entry.key,
+        entry.value.last.name,
+        entry.value.last.price,
+        entry.value.length > 1
+            ? entry.value[entry.value.length - 2].price : null,
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 11, color: color),
-          const SizedBox(width: 2),
-          Flexible(
-            child: Text(label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: color, fontSize: 9, fontWeight: FontWeight.w800)),
-          ),
-        ],
-      ),
-    );
-  }
+  ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 }
-
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
@@ -2470,7 +1816,6 @@ class EmptyState extends StatelessWidget {
   final String message;
   final String? buttonLabel;
   final VoidCallback? onPressed;
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -2509,12 +1854,10 @@ class EmptyState extends StatelessWidget {
     );
   }
 }
-
 double _toDouble(dynamic value) {
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '') ?? 0;
 }
-
 String formatDate(DateTime date) {
   const months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -2522,5 +1865,4 @@ String formatDate(DateTime date) {
   ];
   return '${months[date.month - 1]} ${date.day}, ${date.year}';
 }
-
 String formatPeso(double value) => '₱${value.toStringAsFixed(2)}';
