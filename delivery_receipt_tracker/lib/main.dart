@@ -121,6 +121,11 @@ class ReceiptlyHome extends StatefulWidget {
 class _ReceiptlyHomeState extends State<ReceiptlyHome> {
   int _selectedTab = 0;
   String _supplierSearch = '';
+  String _productSearch = '';
+  bool _productSortByPrice = true;
+  final Set<String> _selectedSearchProducts = <String>{};
+  String _searchRowKey(_SupplierLatestPrice item) =>
+      '${item.supplier.toLowerCase()}\u001f${item.product.toLowerCase()}';
   final TextEditingController _supplierSearchController = TextEditingController();
   bool _loading = true;
   final List<Supplier> _suppliers = [];
@@ -134,13 +139,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
     _supplierSearchController.dispose();
     super.dispose();
   }
-  Future<void> _manageAliases() async {
-    final changed = await showDialog<bool>(
-      context: context,
-      builder: (_) => const _AliasManagerDialog(),
-    );
-    if (changed == true && mounted) await _loadData();
-  }
   Future<void> _loadData() async {
     setState(() => _loading = true);
     try {
@@ -151,7 +149,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       final supplierRows = await supabase.from('suppliers').select();
       final receiptRows = await supabase.from('receipts').select();
       final itemRows = await supabase.from('receipt_items').select();
-      await _loadConfirmedAliases();
       final byName = <String, Supplier>{};
       for (final row in supplierRows) {
         final name = (row['name'] ?? '').toString().trim();
@@ -291,11 +288,6 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Manage product aliases',
-            onPressed: _manageAliases,
-            icon: const Icon(Icons.merge_type_rounded),
-          ),
-          IconButton(
             tooltip: 'Refresh',
             onPressed: _loadData,
             icon: const Icon(Icons.refresh_rounded),
@@ -307,7 +299,9 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
             ? const Center(child: CircularProgressIndicator())
             : _selectedTab == 0
                 ? _buildSuppliersPage()
-                : _buildComparisonPage(),
+                : _selectedTab == 1
+                    ? _buildComparisonPage()
+                    : _buildProductSearchPage(),
       ),
       floatingActionButton: _selectedTab == 0
           ? FloatingActionButton.extended(
@@ -335,6 +329,11 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
             selectedIcon:
                 Icon(Icons.compare_arrows_rounded, color: AppColors.orange),
             label: 'Compare',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.search_rounded),
+            selectedIcon: Icon(Icons.search_rounded, color: AppColors.orange),
+            label: 'Search',
           ),
         ],
       ),
@@ -455,37 +454,319 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       ],
     );
   }
-  Widget _buildComparisonPage() {
-    final grouped = <String, List<_SupplierLatestPrice>>{};
+  void _compareSelectedSearchProducts(List<_SupplierLatestPrice> allRows) {
+    final selected = allRows.where(
+      (item) => _selectedSearchProducts.contains(_searchRowKey(item)),
+    ).toList()..sort((a, b) => a.price.compareTo(b.price));
+    final suppliers = selected.map((item) => item.supplier.toLowerCase()).toSet();
+    if (selected.length < 2 || suppliers.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'Select at least two products from different suppliers to compare.',
+        )),
+      );
+      return;
+    }
+    final lowest = selected.first.price;
+    final highest = selected.last.price;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.white,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            18, 8, 18, MediaQuery.viewInsetsOf(sheetContext).bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Selected product comparison',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Text('${selected.length} products from ${suppliers.length} suppliers',
+                    style: const TextStyle(color: AppColors.gray)),
+                const SizedBox(height: 16),
+                const Row(children: [
+                  Expanded(flex: 5, child: Text('DESCRIPTION',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                  Expanded(flex: 3, child: Text('SUPPLIER',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                  Expanded(flex: 2, child: Text('PRICE',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                ]),
+                const Divider(),
+                ...selected.map((item) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(flex: 5, child: Text(item.product,
+                        style: const TextStyle(fontSize: 11))),
+                    const SizedBox(width: 6),
+                    Expanded(flex: 3, child: Text(item.supplier,
+                        style: const TextStyle(fontSize: 11))),
+                    const SizedBox(width: 6),
+                    Expanded(flex: 2, child: Text('₱${item.price.toStringAsFixed(2)}',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: item.price == lowest
+                              ? AppColors.decrease : AppColors.black,
+                        ))),
+                  ]),
+                )),
+                const Divider(),
+                Text('Recorded price range: ₱${(highest - lowest).toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 8),
+                const Text(
+                  'These are manually selected descriptions, not verified identical products. '
+                  'Only compare prices when products and purchase units are equivalent.',
+                  style: TextStyle(fontSize: 12, color: AppColors.gray),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProductSearchPage() {
+    // Reuse the latest-per-supplier price calculation. Search never changes
+    // product identities or merges similar descriptions into one result.
+    final rows = <_SupplierLatestPrice>[];
     for (final supplier in _suppliers) {
-      for (final item in _latestSupplierPrices(supplier)) {
-        grouped.putIfAbsent(item.key, () => []).add(
-          _SupplierLatestPrice(supplier.name, item.name, item.price,
-              item.previous != null && item.price > item.previous!
-                  ? item.price - item.previous! : 0));
+      for (final product in _latestSupplierPrices(supplier)) {
+        rows.add(_SupplierLatestPrice(
+          supplier.name,
+          product.name,
+          product.price,
+          product.previous != null && product.price > product.previous!
+              ? product.price - product.previous!
+              : 0,
+        ));
       }
     }
-    final groups = grouped.entries.where((e) =>
-        e.value.map((offer) => offer.supplier.toLowerCase()).toSet().length >= 2).toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
+    // Multiple keywords can appear in any order; supplier names are searchable.
+    final terms = _productSearch.toLowerCase().trim()
+        .split(RegExp(r'\s+'))
+        .where((term) => term.isNotEmpty)
+        .toList();
+    final filtered = rows.where((item) {
+      final searchable = '${item.product} ${item.supplier}'.toLowerCase();
+      return terms.every(searchable.contains);
+    }).toList();
+    filtered.sort((a, b) {
+      if (_productSortByPrice) {
+        final byPrice = a.price.compareTo(b.price);
+        if (byPrice != 0) return byPrice;
+      }
+      final byName = a.product.toLowerCase().compareTo(b.product.toLowerCase());
+      if (byName != 0) return byName;
+      return a.supplier.toLowerCase().compareTo(b.supplier.toLowerCase());
+    });
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+      children: [
+        const Text('Product Search',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        const Text('Search products across suppliers using their latest recorded prices.',
+            style: TextStyle(color: AppColors.gray)),
+        const SizedBox(height: 16),
+        TextField(
+          onChanged: (value) => setState(() => _productSearch = value),
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded),
+            hintText: 'Search product or supplier',
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: Text('${filtered.length} matching products',
+                  style: const TextStyle(fontSize: 12, color: AppColors.gray)),
+            ),
+            DropdownButton<bool>(
+              value: _productSortByPrice,
+              underline: const SizedBox.shrink(),
+              items: const [
+                DropdownMenuItem(value: true, child: Text('Lowest price')),
+                DropdownMenuItem(value: false, child: Text('Product A–Z')),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _productSortByPrice = value);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(
+            child: Text('${_selectedSearchProducts.length} selected',
+                style: const TextStyle(fontSize: 12, color: AppColors.gray)),
+          ),
+          TextButton(
+            onPressed: _selectedSearchProducts.isEmpty
+                ? null
+                : () => setState(_selectedSearchProducts.clear),
+            child: const Text('Clear'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: _selectedSearchProducts.length < 2
+                ? null
+                : () => _compareSelectedSearchProducts(rows),
+            icon: const Icon(Icons.compare_arrows_rounded, size: 17),
+            label: const Text('Compare'),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        if (filtered.isEmpty)
+          const EmptyState(
+            icon: Icons.search_off_rounded,
+            title: 'No products found',
+            message: 'Try another keyword or add products to your suppliers.',
+          )
+        else
+          Card(
+            color: AppColors.white,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 36),
+                        Expanded(flex: 5, child: Text('DESCRIPTION',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                        Expanded(flex: 3, child: Text('SUPPLIER',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                        Expanded(flex: 2, child: Text('PRICE', textAlign: TextAlign.right,
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ...filtered.map((item) => Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 36,
+                              child: Checkbox(
+                                value: _selectedSearchProducts.contains(_searchRowKey(item)),
+                                onChanged: (checked) => setState(() {
+                                  if (checked == true) {
+                                    _selectedSearchProducts.add(_searchRowKey(item));
+                                  } else {
+                                    _selectedSearchProducts.remove(_searchRowKey(item));
+                                  }
+                                }),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                            Expanded(flex: 5, child: Text(item.product,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+                            const SizedBox(width: 6),
+                            Expanded(flex: 3, child: Text(item.supplier,
+                                style: const TextStyle(fontSize: 11))),
+                            const SizedBox(width: 6),
+                            Expanded(flex: 2, child: Text('₱${item.price.toStringAsFixed(2)}',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+                    ],
+                  )),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 12),
+        const Text('Prices are recorded supplier prices. Verify equivalent units before comparing.',
+            style: TextStyle(fontSize: 11, color: AppColors.gray)),
+      ],
+    );
+  }
+  Widget _buildComparisonPage() {
+    // Match descriptions across suppliers without changing receipt history.
+    // A group is formed only when identity, size and variant checks agree.
+    final candidates = <_SupplierLatestPrice>[];
+    for (final supplier in _suppliers) {
+      for (final item in _latestSupplierPrices(supplier)) {
+        candidates.add(_SupplierLatestPrice(
+          supplier.name, item.name, item.price,
+          item.previous != null && item.price > item.previous!
+              ? item.price - item.previous! : 0,
+        ));
+      }
+    }
+    final clusters = <List<_SupplierLatestPrice>>[];
+    for (final candidate in candidates) {
+      final matches = clusters.where((cluster) =>
+          cluster.every((existing) => _sameProductVariant(
+              existing.product, candidate.product))).toList();
+      if (matches.length == 1) {
+        matches.single.add(candidate);
+      } else {
+        // Ambiguous matches remain separate instead of merging products.
+        clusters.add([candidate]);
+      }
+    }
+    final groups = clusters.where((cluster) =>
+        cluster.map((offer) => offer.supplier.toLowerCase()).toSet().length >= 2)
+        .toList()
+      ..sort((a, b) => a.first.product.compareTo(b.first.product));
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       children: [
         const Text('Compare suppliers',
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
-        const Text('Compare the latest unit prices of products shared by two or more suppliers. Price increases are shown when recorded.',
+        const Text('Automatically match similar descriptions across suppliers. Prices are comparable only when their receipt units are equivalent.',
             style: TextStyle(color: AppColors.gray)),
         const SizedBox(height: 20),
         if (groups.isEmpty)
           const EmptyState(
             icon: Icons.compare_arrows_rounded,
             title: 'No shared products yet',
-            message: 'Scan matching products from at least two suppliers to compare their latest unit prices.',
+            message: 'Add or scan the same product from at least two suppliers. Different descriptions can be matched automatically.',
           )
         else
           ...groups.map((group) {
-            final offers = [...group.value]
+            // One latest offer per supplier in a matched group.
+            final bySupplier = <String, _SupplierLatestPrice>{};
+            for (final offer in group) {
+              final key = offer.supplier.toLowerCase();
+              if (!bySupplier.containsKey(key) ||
+                  offer.price < bySupplier[key]!.price) {
+                bySupplier[key] = offer;
+              }
+            }
+            final offers = bySupplier.values.toList()
               ..sort((a, b) => a.price.compareTo(b.price));
             final lowest = offers.first.price;
             final highest = offers.last.price;
@@ -532,7 +813,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
                     if (highest > lowest) ...[
                       const SizedBox(height: 10),
                       Text(
-                        'Save up to ₱${(highest - lowest).toStringAsFixed(2)} per unit with ${offers.first.supplier}',
+                        'Recorded unit-price difference: ₱${(highest - lowest).toStringAsFixed(2)} (verify equivalent units)',
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -1613,147 +1894,184 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
     );
   }
 }
-// A confirmation-only alias manager. Saving never modifies receipt rows;
-// it changes the comparison key used for latest prices and supplier matches.
-class _AliasManagerDialog extends StatefulWidget {
-  const _AliasManagerDialog();
-  @override
-  State<_AliasManagerDialog> createState() => _AliasManagerDialogState();
-}
-class _AliasManagerDialogState extends State<_AliasManagerDialog> {
-  final _alias = TextEditingController();
-  final _canonical = TextEditingController();
-  bool _saving = false;
-  bool _changed = false;
-  String? _error;
-  @override
-  void dispose() {
-    _alias.dispose();
-    _canonical.dispose();
-    super.dispose();
-  }
-  Future<void> _save() async {
-    final a = _normalizedProductName(_alias.text);
-    final c = _productComparisonKey(_canonical.text);
-    if (a.isEmpty || c.isEmpty || a == c) {
-      setState(() => _error = 'Enter two different names for the exact same product.');
-      return;
-    }
-    setState(() { _saving = true; _error = null; });
-    try {
-      await supabase.from('product_aliases').upsert({
-        'alias_key': a,
-        'canonical_key': c,
-      }, onConflict: 'alias_key');
-      _confirmedProductAliases[a] = c;
-      _alias.clear();
-      _canonical.clear();
-      if (mounted) setState(() => _changed = true);
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Could not save alias: $e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-  Future<void> _remove(String alias) async {
-    setState(() => _saving = true);
-    try {
-      await supabase.from('product_aliases').delete().eq('alias_key', alias);
-      _confirmedProductAliases.remove(alias);
-      if (mounted) setState(() => _changed = true);
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Could not remove alias: $e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Product aliases'),
-    content: SizedBox(
-      width: 430,
-      child: SingleChildScrollView(child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Only merge the same brand, flavor, size and pack. '
-              'Confirmed aliases apply across all suppliers.',
-              style: TextStyle(fontSize: 12)),
-          const SizedBox(height: 12),
-          TextField(controller: _alias,
-              decoration: const InputDecoration(labelText: 'Alternate receipt name',
-                  hintText: 'CHPY BBQ 110 GR')),
-          const SizedBox(height: 10),
-          TextField(controller: _canonical,
-              decoration: const InputDecoration(labelText: 'Correct product name',
-                  hintText: 'CHIPPY BBQ 110G')),
-          if (_error != null) Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: _saving ? null : _save,
-              child: const Text('Confirm same product')),
-          const Divider(height: 26),
-          ..._confirmedProductAliases.entries.map((e) => ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            title: Text(e.key, style: const TextStyle(fontSize: 12)),
-            subtitle: Text('→ ${e.value}', style: const TextStyle(fontSize: 12)),
-            trailing: IconButton(
-              tooltip: 'Remove alias',
-              onPressed: _saving ? null : () => _remove(e.key),
-              icon: const Icon(Icons.close_rounded),
-            ),
-          )),
-        ],
-      )),
-    ),
-    actions: [TextButton(
-      onPressed: () => Navigator.pop(context, _changed),
-      child: const Text('Done'),
-    )],
-  );
+// Compare products using their receipt descriptions without user-defined aliases.
+// Whitespace and punctuation differences are ignored, but distinct descriptions
+// are not manually merged.
+String _productComparisonKey(String name) => name
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
+
+// Automatic, conservative receipt-description matching (no user aliases).
+// Keeps each supplier's original wording and receipt prices unchanged.
+// IMPORTANT: unit-price columns can represent different purchase units;
+// a description match alone cannot prove equal pricing units.
+String _matchNormalize(String text) {
+  var s = text.toUpperCase().trim();
+  // Remove leading supplier stock codes, but never strip product brand "555".
+  s = s.replaceFirst(RegExp(r'^M1\s+'), '');
+  s = s.replaceFirst(RegExp(r'^\d{4,8}\s+(?=[A-Z])'), '');
+  s = s.replaceFirst(RegExp(r'^\d{4,8}(?=[A-Z])'), '');
+
+  // Standardize measurements before handling cartons.
+  s = s.replaceAllMapped(
+      RegExp(r'(\d+(?:\.\d+)?)\s*(?:GRAMS?|GMS?)\b'),
+      (m) => '${m.group(1)}G');
+  s = s.replaceAllMapped(
+      RegExp(r'(\d+(?:\.\d+)?)\s*(?:MILLILITERS?|MILLILITRES?|MLS?)\b'),
+      (m) => '${m.group(1)}ML');
+
+  // 4/6/220ML means 24 units of 220ML; 10/8/20G means 80 of 20G.
+  s = s.replaceAllMapped(
+      RegExp(r'\b(\d+)\s*[/X]\s*(\d+)\s*[/X]\s*(\d+(?:\.\d+)?\s*(?:KG|MG|G|ML|L))\b'),
+      (m) => 'CASE ${int.parse(m.group(1)!) * int.parse(m.group(2)!)} ${m.group(3)}');
+  // 100/155G, 14X640G, and 42X150G denote carton count and unit size.
+  s = s.replaceAllMapped(
+      RegExp(r'\b(\d+)\s*[/X]\s*(\d+(?:\.\d+)?\s*(?:KG|MG|G|ML|L))\b'),
+      (m) => 'CASE ${m.group(1)} ${m.group(2)}');
+  // 155G 100PCS or 640G CASE 14: preserve the same canonical carton count.
+  s = s.replaceAllMapped(
+      RegExp(r'\b(\d+(?:\.\d+)?\s*(?:KG|MG|G|ML|L))\s+(?:CASE\s+(?:OF\s+)?)?(\d+)\s*(?:PCS|PIECES|UNITS)\b'),
+      (m) => 'CASE ${m.group(2)} ${m.group(1)}');
+  s = s.replaceAllMapped(
+      RegExp(r'\b(\d+(?:\.\d+)?\s*(?:KG|MG|G|ML|L))\s+CASE\s+(?:OF\s+)?(\d+)\b'),
+      (m) => 'CASE ${m.group(2)} ${m.group(1)}');
+  s = s.replaceAllMapped(
+      RegExp(r'\b(\d+)\s*(?:PCS|PIECES|UNITS)\b'),
+      (m) => 'CASE ${m.group(1)}');
+
+  s = s.replaceAll(RegExp(r'\bNESTLE\s+(?=MILO\b)'), '');
+  s = s.replaceAll(RegExp(r'\bMILO\s+CHOCO\s+MALT\s+DRINK\b'),
+      'MILO MILK DRINK');
+  s = s.replaceAll(RegExp(r'[^A-Z0-9]+'), ' ').trim();
+
+  const words = <String, String>{
+    'CHPY':'CHIPPY', 'CHIPY':'CHIPPY', 'CHPPY':'CHIPPY',
+    'RD':'RED', 'GRN':'GREEN', 'GR':'GREEN', 'SM':'SMALL',
+    'S':'SMALL', 'LG':'LARGE',
+    'SARD':'SARDINES', 'SARDINE':'SARDINES',
+    'PWD':'POWDER', 'POWDERED':'POWDER',
+    'JCE':'JUICE', 'JUC':'JUICE', 'PINE':'PINEAPPLE',
+    'SWT':'SWEET', 'EO':'EASYOPEN',
+    'DM':'DELMONTE', 'DEL':'DELMONTE',
+    'CHDR':'CHEDDAR', 'CHDOR':'CHEDDAR', 'CHMY':'CHICHARON',
+  };
+  final tokens = s.split(RegExp(r'\s+'));
+  final expanded = tokens.map((t) => words[t] ?? t).join(' ');
+  return expanded
+      .replaceAll(RegExp(r'\bBEAR BRAND\b'), 'BEARBRAND')
+      .replaceAll(RegExp(r'\bDEL MONTE\b'), 'DELMONTE')
+      .replaceAll(RegExp(r'\bEASY OPEN\b'), 'EASYOPEN');
 }
 
-// Confirm supplier-specific aliases here. Only put descriptions that you
-// have verified are exactly the same product, variant, and pack size.
-// Example: 'chpy bbq 27g': 'chippy bbq 27g',
-final Map<String, String> _confirmedProductAliases = {};
-
-Future<void> _loadConfirmedAliases() async {
-  final rows = await supabase.from('product_aliases')
-      .select('alias_key, canonical_key');
-  _confirmedProductAliases
-    ..clear()
-    ..addEntries(rows.map((row) => MapEntry(
-      row['alias_key'].toString(), row['canonical_key'].toString())));
+class _MatchIdentity {
+  _MatchIdentity(String description)
+      : normalized = _matchNormalize(description) {
+    // Keep exact package/weight values; don't mistake 20g for 80g.
+    final sizeMatches = RegExp(r'\d+(?:\.\d+)?\s*(?:KG|MG|G|ML|L)\b')
+        .allMatches(normalized);
+    sizes = sizeMatches.map((m) => m.group(0)!.replaceAll(' ', '')).toSet();
+    final caseMatch = RegExp(r'\bCASE\s+(\d+)\b').firstMatch(normalized);
+    caseCount = caseMatch == null ? null : int.tryParse(caseMatch.group(1)!);
+    // Number immediately before / or X can be a carton quantity.
+    // Do not remove the individual weight or volume.
+    final withoutSizes = normalized.replaceAll(
+        RegExp(r'\d+(?:\.\d+)?\s*(?:KG|MG|G|ML|L)\b'), ' ');
+    final withoutPacks = withoutSizes
+        .replaceAll(RegExp(r'\bCASE\s+\d+\b'), ' ')
+        .replaceAll(RegExp(r'\b\d+(?:\s*[X/]\s*\d+)+\b'), ' ');
+    tokens = withoutPacks.split(RegExp(r'\s+'))
+        .where((t) => t.length > 1 && !RegExp(r'^\d+$').hasMatch(t))
+        .where((t) => !const {'PH','PCS','CS','SAVE','PROMO','PACK','PK','M1','CASE','PASS','FAIL','GRAMS','OF','PHILIPPINES'}
+            .contains(t)).toSet();
+  }
+  final String normalized;
+  late final Set<String> sizes;
+  late final int? caseCount;
+  late final Set<String> tokens;
 }
 
-// Case/punctuation, GR/G and BBQ/BARBECUE are safe lexical changes.
-// CHPY/CHIPPY requires an explicit saved alias.
-String _standardizeProductTerms(String name) {
-  var text = name.toLowerCase();
-  text = text.replaceAll(RegExp(r'\bbarbecue\b'), 'bbq');
-  text = text.replaceAll(RegExp(r'\bbarbeque\b'), 'bbq');
-  text = text.replaceAll(RegExp(r'(\d)\s*(?:grams?|grms?|gr)\b'), r'$1g');
-  text = text.replaceAll(RegExp(r'\bgrams?\b'), 'g');
-  return text;
+int _editDistance(String a, String b) {
+  var previous = List<int>.generate(b.length + 1, (i) => i);
+  for (var i = 1; i <= a.length; i++) {
+    final current = List<int>.filled(b.length + 1, 0);
+    current[0] = i;
+    for (var j = 1; j <= b.length; j++) {
+      final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+      final deletion = previous[j] + 1;
+      final insertion = current[j - 1] + 1;
+      final substitution = previous[j - 1] + cost;
+      current[j] = [deletion, insertion, substitution]
+          .reduce((a, b) => a < b ? a : b);
+    }
+    previous = current;
+  }
+  return previous[b.length];
 }
-String _normalizedProductName(String name) {
-  var normalized = _standardizeProductTerms(name)
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  // Receipt OCR often reads the leading "M1" stock marker as "MI".
-  // This marker is not part of the product identity.
-  normalized = normalized.replaceFirst(RegExp(r'^(m1|mi)\s+'), '');
-  return normalized;
+
+bool _similarToken(String a, String b) {
+  if (a == b) { return true; }
+  if (a.length < 5 || b.length < 5) { return false; }
+  final longer = a.length > b.length ? a.length : b.length;
+  return _editDistance(a, b) <= (longer >= 9 ? 2 : 1);
 }
-String _productComparisonKey(String name) {
-  final normalized = _normalizedProductName(name);
-  return _confirmedProductAliases[normalized] ?? normalized;
+
+bool _sameProductVariant(String first, String second) {
+  final a = _MatchIdentity(first);
+  final b = _MatchIdentity(second);
+  if (a.normalized == b.normalized) { return true; }
+  // Conflicting known case quantities should not be compared as equal units.
+  if (a.caseCount != null && b.caseCount != null &&
+      a.caseCount != b.caseCount) {
+    return false;
+  }
+  // Missing size is not proof of the same SKU; conflicting sizes are rejected.
+  if (a.sizes.isEmpty != b.sizes.isEmpty ||
+      (a.sizes.isNotEmpty && !a.sizes.containsAll(b.sizes)) ||
+      (b.sizes.isNotEmpty && !b.sizes.containsAll(a.sizes))) {
+    return false;
+  }
+  const variants = <Set<String>>[
+    {'RED','GREEN','BLUE','YELLOW','ORANGE'},
+    {'SMALL','MEDIUM','LARGE'},
+    {'SWEET','SOUR'},
+    {'SLICES','CRUSHED','CHUNKS'},
+    {'ORIGINAL','BBQ','BARBECUE','CHEESE','SPICY','HOT'},
+    {'POWDER','LIQUID'},
+  ];
+  for (final family in variants) {
+    final av = a.tokens.intersection(family);
+    final bv = b.tokens.intersection(family);
+    if (av.isNotEmpty && bv.isNotEmpty &&
+        av.intersection(bv).isEmpty) {
+      return false;
+    }
+    // Don't merge a specified variant with an unspecified variant.
+    if (av.isEmpty != bv.isEmpty) {
+      return false;
+    }
+  }
+  if (a.tokens.isEmpty || b.tokens.isEmpty) { return false; }
+  final left = a.tokens.toList();
+  final right = b.tokens.toList();
+  final used = <int>{};
+  var matched = 0;
+  for (final token in left) {
+    for (var i = 0; i < right.length; i++) {
+      if (!used.contains(i) && _similarToken(token, right[i])) {
+        used.add(i);
+        matched++;
+        break;
+      }
+    }
+  }
+  // High overlap in BOTH directions prevents generic-brand-only matches.
+  return matched >= 2 &&
+      matched / left.length >= 0.80 &&
+      matched / right.length >= 0.80;
 }
+
 class _LatestSupplierProduct {
   const _LatestSupplierProduct(this.key, this.name, this.price, this.previous);
   final String key;
