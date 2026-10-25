@@ -24,5 +24,5 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/receiptly_icon.png"
+  image_path: "assets/logo.png"
   remove_alpha_ios: true
