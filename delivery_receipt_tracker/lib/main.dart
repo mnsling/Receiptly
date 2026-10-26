@@ -22,14 +22,14 @@ Future<void> main() async {
   runApp(const ReceiptlyApp());
 }
 class AppColors {
-  static const orange = Color(0xFFE85014);
-  static const black = Color(0xFF000000);
-  static const white = Color(0xFFF9F9F9);
-  static const gray = Color(0xFF646464);
+  static const orange = Color(0xFFFF5B20);
+  static const black = Color(0xFF17181D);
+  static const white = Color(0xFFFFFFFF);
+  static const gray = Color(0xFF777985);
   static const lightGray = Color(0xFFA7A7A7);
   static const darkGray = Color(0xFF333333);
-  static const background = Color(0xFFF4F4F4);
-  static const border = Color(0xFFE8E8E8);
+  static const background = Color(0xFFF7F7F9);
+  static const border = Color(0xFFEDEDF0);
   static const decrease = Color(0xFF21865B);
 }
 class ReceiptProduct {
@@ -76,6 +76,15 @@ class ReceiptlyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
+        fontFamily: '.SF Pro Text',
+        textTheme: const TextTheme(
+          headlineLarge: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.7),
+          headlineMedium: TextStyle(fontSize: 25, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+          titleLarge: TextStyle(fontSize: 21, fontWeight: FontWeight.w700, letterSpacing: -0.35),
+          titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.2),
+          bodyLarge: TextStyle(fontSize: 15, letterSpacing: -0.15),
+          bodyMedium: TextStyle(fontSize: 14, letterSpacing: -0.1),
+        ),
         scaffoldBackgroundColor: AppColors.background,
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.orange,
@@ -87,7 +96,14 @@ class ReceiptlyApp extends StatelessWidget {
           foregroundColor: AppColors.black,
           elevation: 0,
           centerTitle: false,
+          titleTextStyle: TextStyle(color: AppColors.black, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: -0.45),
         ),
+        cardTheme: CardThemeData(color: AppColors.white, elevation: 0, margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22), side: const BorderSide(color: AppColors.border))),
+        filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
+          backgroundColor: AppColors.orange, foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)))),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: AppColors.white,
@@ -95,15 +111,15 @@ class ReceiptlyApp extends StatelessWidget {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(17),
             borderSide: const BorderSide(color: AppColors.border),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(17),
             borderSide: const BorderSide(color: AppColors.border),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(17),
             borderSide:
                 const BorderSide(color: AppColors.orange, width: 1.5),
           ),
@@ -279,11 +295,11 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
                   color: AppColors.white, size: 21),
             ),
             const SizedBox(width: 10),
-            const Text('receiptly',
+            const Text('Receiptly',
                 style: TextStyle(
                     fontWeight: FontWeight.w800,
-                    fontSize: 24,
-                    letterSpacing: -1)),
+                    fontSize: 23,
+                    letterSpacing: -0.55)),
           ],
         ),
         actions: [
@@ -313,6 +329,9 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
             )
           : null,
       bottomNavigationBar: NavigationBar(
+        height: 74,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        elevation: 0,
         selectedIndex: _selectedTab,
         onDestinationSelected: (index) => setState(() => _selectedTab = index),
         backgroundColor: AppColors.white,
@@ -351,18 +370,8 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       children: [
-        const Text('Your inventory,\nwithout the guesswork.',
-            style: TextStyle(
-                fontSize: 28,
-                height: 1.15,
-                letterSpacing: -0.8,
-                fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        const Text(
-          'Scan receipts to keep each supplier’s product prices up to date.',
-          style: TextStyle(color: AppColors.gray, fontSize: 14, height: 1.5),
-        ),
-        const SizedBox(height: 24),
+        const _ReceiptlyHero(),
+        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(
@@ -583,7 +592,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
       children: [
         const Text('Product Search',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+            style: TextStyle(fontSize: 28, letterSpacing: -0.5, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         const Text('Search products across suppliers using their latest recorded prices.',
             style: TextStyle(color: AppColors.gray)),
@@ -654,7 +663,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
                     padding: EdgeInsets.symmetric(vertical: 10),
                     child: Row(
                       children: [
-                        SizedBox(width: 36),
+                        const SizedBox(width: 36),
                         Expanded(flex: 5, child: Text('DESCRIPTION',
                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
                         Expanded(flex: 3, child: Text('SUPPLIER',
@@ -744,7 +753,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       children: [
         const Text('Compare suppliers',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+            style: TextStyle(fontSize: 28, letterSpacing: -0.5, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         const Text('Automatically match similar descriptions across suppliers. Prices are comparable only when their receipt units are equivalent.',
             style: TextStyle(color: AppColors.gray)),
@@ -876,6 +885,52 @@ class _CreateSupplierDialogState extends State<CreateSupplierDialog> {
     );
   }
 }
+
+// Modern editorial dashboard header; visual-only, no business logic changes.
+class _ReceiptlyHero extends StatelessWidget {
+  const _ReceiptlyHero();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFF7A31), Color(0xFFF54B15), Color(0xFFCD2B13)],
+        ),
+        borderRadius: BorderRadius.circular(27),
+      ),
+      child: Stack(children: [
+        Positioned(right: -48, top: -62, child: Container(width: 205, height: 205,
+          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white.withValues(alpha: .14), width: 34)))),
+        Positioned(right: -15, bottom: -95, child: Container(width: 195, height: 195,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black.withValues(alpha: .075)))),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(23, 26, 23, 27),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 16),
+              const SizedBox(width: 7),
+              Text('YOUR SMART RECEIPT HUB', style: TextStyle(color: Colors.white.withValues(alpha: .88),
+                fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: .3)),
+            ]),
+            const SizedBox(height: 25),
+            const Text('Every price.\nOne clear view.', style: TextStyle(
+              fontSize: 30, height: 1.08, fontWeight: FontWeight.w800,
+              letterSpacing: -0.75, color: Colors.white)),
+            const SizedBox(height: 12),
+            Text('Track suppliers, scan receipts and spot price changes.',
+              style: TextStyle(fontSize: 13, height: 1.45, color: Colors.white.withValues(alpha: .9))),
+            const SizedBox(height: 10),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
 class SummaryCard extends StatelessWidget {
   const SummaryCard({
     super.key,
@@ -892,7 +947,7 @@ class SummaryCard extends StatelessWidget {
       padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
         color: AppColors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.border),
       ),
       child: Column(
@@ -906,8 +961,8 @@ class SummaryCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(label,
               style: const TextStyle(
-                  fontSize: 10,
-                  letterSpacing: 1,
+                  fontSize: 11,
+                  letterSpacing: 0.1,
                   fontWeight: FontWeight.w700,
                   color: AppColors.gray)),
         ],
@@ -923,14 +978,14 @@ class SupplierCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.white,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(22),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(color: AppColors.border),
           ),
           child: Row(
@@ -1695,7 +1750,7 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: AppColors.background,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(17),
                     ),
                     child: const Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1880,7 +1935,7 @@ class _OcrReviewDialogState extends State<OcrReviewDialog> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 18, vertical: 13),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                          borderRadius: BorderRadius.circular(17)),
                     ),
                     icon: const Icon(Icons.check_rounded, size: 18),
                     label: const Text('Save products'),
@@ -2140,7 +2195,7 @@ class EmptyState extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
       decoration: BoxDecoration(
         color: AppColors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.border),
       ),
       child: Column(
@@ -2150,7 +2205,7 @@ class EmptyState extends StatelessWidget {
             height: 58,
             decoration: BoxDecoration(
               color: AppColors.orange.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(22),
             ),
             child: Icon(icon, color: AppColors.orange, size: 28),
           ),
