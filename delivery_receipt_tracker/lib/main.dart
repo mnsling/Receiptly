@@ -654,7 +654,7 @@ class _ReceiptlyHomeState extends State<ReceiptlyHome> {
                     padding: EdgeInsets.symmetric(vertical: 10),
                     child: Row(
                       children: [
-                        const SizedBox(width: 36),
+                        SizedBox(width: 36),
                         Expanded(flex: 5, child: Text('DESCRIPTION',
                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
                         Expanded(flex: 3, child: Text('SUPPLIER',
