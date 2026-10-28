@@ -1,39 +1,18 @@
-
-<pre>
 R E C E I P T L Y
-────────────────────────────────
-SCAN  /  TRACK  /  COMPARE
-</pre>
+────────────────────────────────────────
+Receipt scanning and supplier price tracking.
 
-A minimal receipt scanning and supplier price tracking app built with Flutter.
+A Flutter app for organizing supplier products,
+extracting receipt data, and tracking price changes.
 
-![Receiptly Preview](assets/receiptly-preview.png)
+FEATURES
+01  Suppliers       Manage suppliers and product records
+02  Receipt Scan    Crop, scan, review, and save items
+03  Comparison      Track increases and compare prices
+04  Product Search  Find and compare products across suppliers
 
-### Overview
+STACK
+Flutter / Dart  ·  Supabase  ·  Google ML Kit
 
-Receiptly helps businesses digitize supplier receipts, organize products, and monitor price changes through a simple three-tab interface.
-
-### Features
-
-- **Suppliers** — Manage suppliers, scan receipts, and organize product records.
-- **Price Comparison** — Track price increases and compare prices across suppliers.
-- **Product Search** — Search products and compare selected entries.
-- **Smart OCR** — Extract product descriptions and unit prices from receipt images.
-- **Product Matching** — Match similar product descriptions across suppliers.
-
-### Stack
-
-`Flutter` · `Dart` · `Supabase` · `Google ML Kit` · `Codemagic`
-
-### Run
-
-```bash
-flutter pub get
-flutter run -t delivery_receipt_tracker/lib/main.dart
-```
-
-Requires Supabase configuration.
-
----
-
-<sub>Receiptly · Every receipt. Every price.</sub>
+STATUS
+In development · iOS-focused
