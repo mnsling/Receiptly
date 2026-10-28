@@ -5,9 +5,6 @@
 
 <code>Receipt scanning · Supplier management · Price tracking</code>
 <br>
-<code>SCAN.</code> &nbsp; <code>ORGANIZE.</code> &nbsp; <code>COMPARE.</code>
-
-<br>
 
 <img src="assets/Angled Supplier App Showcase.png" alt="Receiptly app preview" width="680">
 
