@@ -17,7 +17,9 @@
 - <code>02 / Receipt Scan</code> — Crop, scan, review, and save products using on-device OCR.
 - <code>03 / Price Comparison</code> — Track price increases and compare suppliers.
 - <code>04 / Product Search</code> — Find products and compare selected entries.
+
 <code>STACK</code>
 <code>Flutter</code> · <code>Dart</code> · <code>Supabase</code> · <code>Google ML Kit</code>
+
 <code>STATUS</code>
 <code>In development · iOS-focused</code>
