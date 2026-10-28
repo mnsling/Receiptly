@@ -5,11 +5,11 @@
 
 <code>Receipt scanning · Supplier management · Price tracking</code>
 
-<br><br>
+<br>
 
 <img src="assets/Angled Supplier App Showcase.png" alt="Receiptly app preview" width="680">
 
-<br><br>
+<br>
 
 <code>SCAN.</code> &nbsp; <code>ORGANIZE.</code> &nbsp; <code>COMPARE.</code>
 
@@ -186,8 +186,6 @@ Receiptly is continuously being refined, with emphasis on improving OCR accuracy
 <div align="center">
 
 <sub>Built with Flutter · Powered by Google ML Kit and Supabase</sub>
-
-<br>
 
 <sub>RECEIPTLY — Every receipt. Every price.</sub>
 
