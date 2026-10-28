@@ -8,7 +8,7 @@
 
 <img src="assets/Angled Supplier App Showcase.png" alt="Receiptly app preview" width="680">
 
-<br><br>
+<br>
 
 </div>
 
