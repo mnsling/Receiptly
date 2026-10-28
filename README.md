@@ -4,16 +4,13 @@
 <h1><code>RECEIPTLY</code></h1>
 
 <code>Receipt scanning · Supplier management · Price tracking</code>
+<code>SCAN.</code> &nbsp; <code>ORGANIZE.</code> &nbsp; <code>COMPARE.</code>
 
 <br>
 
 <img src="assets/Angled Supplier App Showcase.png" alt="Receiptly app preview" width="680">
 
-<br>
-
-<code>SCAN.</code> &nbsp; <code>ORGANIZE.</code> &nbsp; <code>COMPARE.</code>
-
-<br>
+<br><br>
 
 </div>
 
