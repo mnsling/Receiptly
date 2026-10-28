@@ -4,6 +4,7 @@
 <h1><code>RECEIPTLY</code></h1>
 
 <code>Receipt scanning · Supplier management · Price tracking</code>
+<br>
 <code>SCAN.</code> &nbsp; <code>ORGANIZE.</code> &nbsp; <code>COMPARE.</code>
 
 <br>
