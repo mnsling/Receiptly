@@ -4,7 +4,7 @@
 
 <code>Receipt scanning · Supplier price tracking</code>
 
-<img src="assets/Receiptly Product Search App Showcase.png" alt="Receiptly app preview" width="680">
+<img src="assets/Angled Supplier App Showcase.png" alt="Receiptly app preview" width="680">
 
 </div>
 
